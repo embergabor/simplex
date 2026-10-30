@@ -147,7 +147,7 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 20.dp),
+                    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
                     items(continuing, key = { it.ratingKey }) { item ->
@@ -169,7 +169,7 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SectionTitle("Libraries", Modifier.padding(horizontal = 48.dp))
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 48.dp, vertical = 20.dp),
+                contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 itemsIndexed(libraries, key = { _, lib -> lib.key }) { i, lib ->
@@ -328,7 +328,7 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
                     }
                     SectionTitle(if (number == 0) "Specials" else "Season $number", Modifier.padding(horizontal = 48.dp))
                     LazyRow(
-                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 20.dp),
+                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
                         horizontalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
                         items(eps, key = { it.ratingKey }) { ep ->

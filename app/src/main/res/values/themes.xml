@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same grey as the app's background, so opening the app doesn't flash white. -->
+    <style name="Theme.Simplex" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ground</item>
+    </style>
+    <color name="ground">#BEBEC3</color>
+</resources>

@@ -2,8 +2,13 @@
 
 package com.ember.simpleplex.ui
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -33,6 +39,8 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -133,14 +141,28 @@ fun Message(text: String) {
 
 private val cardShape = RoundedCornerShape(8.dp)
 
+private const val FOCUSED_SCALE = 1.08f
+
 /**
- * The focused item gets a dark ring with a small gap around it. Drawn as a plain outline: the blurred
- * glow it replaces was hard to see on the light background and costly to animate on the TV.
+ * A focused poster or thumbnail grows together with its title, so nothing covers the text underneath,
+ * and gets a ring drawn inside its edge (see [InsetRing]).
  */
 @Composable
-private fun focusRing(cornerRadius: androidx.compose.ui.unit.Dp) = CardDefaults.border(
-    focusedBorder = Border(BorderStroke(3.dp, Palette.Ink), inset = 4.dp, shape = RoundedCornerShape(cornerRadius + 4.dp)),
-)
+private fun Modifier.focusLift(focused: Boolean): Modifier {
+    val scale by animateFloatAsState(if (focused) FOCUSED_SCALE else 1f, label = "focus")
+    return graphicsLayer { scaleX = scale; scaleY = scale }.zIndex(if (focused) 1f else 0f)
+}
+
+/** Dark outer line for the grey background, white inner line for dark artwork. */
+@Composable
+private fun BoxScope.InsetRing() {
+    Box(
+        Modifier.matchParentSize()
+            .border(2.dp, Palette.Ink, cardShape)
+            .padding(2.dp)
+            .border(3.dp, Color.White, RoundedCornerShape(6.dp))
+    )
+}
 
 @Composable
 private fun Artwork(url: String?, fallback: String) {
@@ -179,6 +201,8 @@ private fun ArtCard(
     badge: String?,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)?,
+    interaction: MutableInteractionSource,
+    focused: Boolean,
     modifier: Modifier,
 ) {
     Card(
@@ -186,9 +210,11 @@ private fun ArtCard(
         onLongClick = onLongClick,
         modifier = modifier.fillMaxWidth().aspectRatio(aspect),
         shape = CardDefaults.shape(cardShape),
-        scale = CardDefaults.scale(focusedScale = 1.1f),
-        border = focusRing(8.dp),
+        // The whole card and its title grow instead (focusLift).
+        scale = CardDefaults.scale(scale = 1f, focusedScale = 1f, pressedScale = 0.97f),
+        border = CardDefaults.border(focusedBorder = Border.None),
         colors = CardDefaults.colors(containerColor = Palette.Placeholder),
+        interactionSource = interaction,
     ) {
         Box(Modifier.fillMaxSize()) {
             Artwork(url, fallback)
@@ -203,6 +229,7 @@ private fun ArtCard(
                     fontSize = 8.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
                 )
             }
+            if (focused) InsetRing()
         }
     }
 }
@@ -218,8 +245,10 @@ fun PosterCard(
     onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ArtCard(imageUrl, title, 2f / 3f, progress, watched, null, onClick, onLongClick, modifier)
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Column(Modifier.focusLift(focused), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ArtCard(imageUrl, title, 2f / 3f, progress, watched, null, onClick, onLongClick, interaction, focused, modifier)
         Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp))
     }
 }
@@ -239,11 +268,13 @@ fun WideCard(
     subtitleFirst: Boolean = false,
     badge: String? = null,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
     Column(
-        modifier = if (width != null) Modifier.width(width) else Modifier,
+        modifier = (if (width != null) Modifier.width(width) else Modifier).focusLift(focused),
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        ArtCard(imageUrl, title, 16f / 9f, progress, watched, badge, onClick, onLongClick, modifier)
+        ArtCard(imageUrl, title, 16f / 9f, progress, watched, badge, onClick, onLongClick, interaction, focused, modifier)
         Column(Modifier.padding(horizontal = 2.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             val small: @Composable (String) -> Unit = { Text(it, fontSize = 9.5.sp, color = Palette.Secondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             val big: @Composable (String) -> Unit = { Text(it, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis) }
@@ -252,7 +283,7 @@ fun WideCard(
     }
 }
 
-/** White tile with an icon, for libraries and folders. */
+/** Light tile with an icon, for libraries and folders. Turns dark when focused, like the buttons. */
 @Composable
 fun IconTile(
     icon: ImageVector,
@@ -265,20 +296,25 @@ fun IconTile(
         onClick = onClick,
         modifier = modifier,
         shape = CardDefaults.shape(RoundedCornerShape(12.dp)),
-        scale = CardDefaults.scale(focusedScale = 1.08f),
-        border = focusRing(12.dp),
-        colors = CardDefaults.colors(containerColor = Palette.Tile, focusedContainerColor = Palette.Tile),
+        scale = CardDefaults.scale(focusedScale = 1.06f),
+        border = CardDefaults.border(focusedBorder = Border.None),
+        colors = CardDefaults.colors(
+            containerColor = Palette.Tile,
+            contentColor = Palette.Ink,
+            focusedContainerColor = Palette.Ink,
+            focusedContentColor = Color.White,
+        ),
     ) {
         if (horizontal) {
             Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                Icon(icon, contentDescription = null, tint = Palette.Ink, modifier = Modifier.size(22.dp))
-                Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
+                Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         } else {
             Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Icon(icon, contentDescription = null, tint = Palette.Ink, modifier = Modifier.size(32.dp))
+                Icon(icon, contentDescription = null, modifier = Modifier.size(32.dp))
                 Spacer(Modifier.height(10.dp))
-                Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink)
+                Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -314,6 +350,29 @@ fun PillButton(
             Spacer(Modifier.width(8.dp))
             Icon(Icons.Check, contentDescription = "Selected", modifier = Modifier.size(12.dp))
         }
+    }
+}
+
+/** Square icon-only version of [PillButton]; disabled (dimmed, not focusable) when [onClick] is null. */
+@Composable
+fun IconPillButton(icon: ImageVector, description: String, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
+    Button(
+        onClick = { onClick?.invoke() },
+        enabled = onClick != null,
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        shape = ButtonDefaults.shape(RoundedCornerShape(8.dp)),
+        scale = ButtonDefaults.scale(focusedScale = 1.04f),
+        colors = ButtonDefaults.colors(
+            containerColor = Palette.Control,
+            contentColor = Palette.Ink,
+            focusedContainerColor = Palette.Ink,
+            focusedContentColor = Color.White,
+            disabledContainerColor = Palette.Control.copy(alpha = 0.5f),
+            disabledContentColor = Palette.Ink.copy(alpha = 0.3f),
+        ),
+    ) {
+        Icon(icon, contentDescription = description, modifier = Modifier.size(16.dp))
     }
 }
 

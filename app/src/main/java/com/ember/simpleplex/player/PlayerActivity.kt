@@ -59,6 +59,10 @@ class PlayerActivity : ComponentActivity() {
     private var index = 0
     private var fromStart = false
     private var shuffle = false
+    /** Whether the queue was widened to the show's whole episode list (ordered play only). */
+    private var wholeShow = false
+    private val canPrevious = mutableStateOf(false)
+    private val canNext = mutableStateOf(false)
 
     /** Where the current stream starts within the file; non-zero only for Plex's audio-converted stream. */
     private var timeBase = 0L
@@ -155,6 +159,8 @@ class PlayerActivity : ComponentActivity() {
                     onSurroundAnswer = { surroundQuestion.value?.second?.complete(it) },
                     askBurn = burnQuestion.value != null,
                     onBurnAnswer = { burnQuestion.value?.complete(it) },
+                    onPrevious = { skip(-1) }.takeIf { canPrevious.value },
+                    onNext = { skip(1) }.takeIf { canNext.value },
                 )
             }
         }
@@ -236,6 +242,8 @@ class PlayerActivity : ComponentActivity() {
             }
 
             current.value = item
+            updateSkips()
+            if (item.isEpisode && !shuffle && !wholeShow) widenToShow(item)
             previews.value = null
             previewJob?.cancel()
             previewJob = launch { previews.value = PreviewThumbs.load(plex, part, cacheDir) }
@@ -405,6 +413,7 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /** The end of a video: marks it watched and plays the next one, or closes the player. */
     private fun next() {
         val item = current.value ?: return finish()
         plex.fire {
@@ -412,20 +421,42 @@ class PlayerActivity : ComponentActivity() {
             setWatched(item.ratingKey, true)
         }
         index++
-        if (index < queue.size) return load()
+        if (index < queue.size) load() else finish()
+    }
 
-        // Started from Continue watching on an episode: keep going with the rest of the show.
-        val showKey = item.grandparentRatingKey
-        if (!item.isEpisode || shuffle || showKey == null) return finish()
+    /** The previous/next episode buttons. Leaves the current one as it is, without marking it watched. */
+    private fun skip(by: Int) {
+        val target = index + by
+        if (target !in queue.indices) return
+        report("stopped")
+        index = target
+        load()
+    }
+
+    /**
+     * An episode played in order (Play, an episode card, Continue watching) gets the show's whole
+     * episode list as its queue, so previous and next can go anywhere in the show.
+     */
+    private fun widenToShow(item: Item) {
+        val showKey = item.grandparentRatingKey ?: return
+        wholeShow = true
         lifecycleScope.launch {
-            val episodes = runCatching { Episodes.ordered(plex.episodes(showKey)) }.getOrNull().orEmpty()
+            val episodes = runCatching { Episodes.ordered(plex.episodes(showKey)) }.getOrNull() ?: return@launch
             val at = episodes.indexOfFirst { it.ratingKey == item.ratingKey }
-            val rest = if (at >= 0) episodes.drop(at + 1) else emptyList()
-            if (rest.isEmpty()) return@launch finish()
-            fromStart = false
-            queue += rest.map { it.ratingKey }
-            load()
+            // Still on the same episode? Then line the queue up around it.
+            if (at < 0 || queue.getOrNull(index) != item.ratingKey) return@launch
+            queue.clear()
+            queue += episodes.map { it.ratingKey }
+            index = at
+            updateSkips()
         }
+    }
+
+    /** Previous/next only for episodes (in order or shuffled); movies and home videos have none. */
+    private fun updateSkips() {
+        val episode = current.value?.isEpisode == true
+        canPrevious.value = episode && index > 0
+        canNext.value = episode && index < queue.size - 1
     }
 
     /**

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -77,6 +78,7 @@ import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Stream
 import com.ember.simpleplex.ui.Icons
 import com.ember.simpleplex.ui.Palette
+import com.ember.simpleplex.ui.IconPillButton
 import com.ember.simpleplex.ui.PillButton
 import com.ember.simpleplex.ui.formatDuration
 import kotlinx.coroutines.delay
@@ -105,6 +107,9 @@ fun PlayerScreen(
     onSurroundAnswer: (Boolean) -> Unit,
     askBurn: Boolean,
     onBurnAnswer: (Boolean) -> Unit,
+    /** Previous/next episode; null where there's none. */
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
 ) {
     var visible by remember { mutableStateOf(true) }
     var lastInput by remember { mutableLongStateOf(0L) }
@@ -175,6 +180,8 @@ fun PlayerScreen(
                     Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { player.togglePlay(); visible = true; true }
                     Key.MediaFastForward -> { scrub(e.nativeKeyEvent, 1); visible = true; true }
                     Key.MediaRewind -> { scrub(e.nativeKeyEvent, -1); visible = true; true }
+                    Key.MediaNext -> { onNext?.invoke(); true }
+                    Key.MediaPrevious -> { onPrevious?.invoke(); true }
                     else -> if (visible) false else {
                         // Hidden controls: left/right start scrubbing, anything else (OK too) just shows the controls.
                         when (e.key) {
@@ -231,6 +238,7 @@ fun PlayerScreen(
             InfoBox(info, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
             Controls(
                 item, duration, audio, subtitle, isPlaying, position, scrubAt, previews, scrub,
+                onPrevious, onNext,
                 modifier = Modifier.align(Alignment.BottomCenter),
                 onPick = { picker = it },
                 onKey = { e ->
@@ -270,6 +278,8 @@ private fun Controls(
     scrubAt: Long?,
     previews: PreviewThumbs?,
     bar: FocusRequester,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
     modifier: Modifier,
     onPick: (Int) -> Unit,
     onKey: (KeyEvent) -> Boolean,
@@ -290,7 +300,7 @@ private fun Controls(
         modifier
             .padding(horizontal = 40.dp, vertical = 32.dp)
             .fillMaxWidth()
-            .background(Color(0xF0FAFAFC), RoundedCornerShape(14.dp))
+            .background(Palette.Ground.copy(alpha = 0.94f), RoundedCornerShape(14.dp))
             .padding(horizontal = 24.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -302,6 +312,11 @@ private fun Controls(
                 Text(item.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, maxLines = 1)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (item.isEpisode) {
+                    IconPillButton(Icons.Previous, "Previous episode", onPrevious)
+                    IconPillButton(Icons.Next, "Next episode", onNext)
+                    Spacer(Modifier.width(8.dp))
+                }
                 PillButton("Subtitles: ${subtitle?.shortName() ?: "Off"}", { onPick(3) }, icon = Icons.Subtitles)
                 PillButton("Audio: ${audio?.shortName() ?: "—"}", { onPick(2) }, icon = Icons.Audio)
             }

@@ -11,14 +11,18 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.lightColorScheme
 
+/**
+ * A constant mid grey rather than white: a bright full screen makes the TV keep adjusting its
+ * brightness. Nothing on screen is pure white except the focus ring and text on dark.
+ */
 object Palette {
-    val Ground = Color(0xFFF2F2F4)
+    val Ground = Color(0xFFBEBEC3)
     val Ink = Color(0xFF1C1C1E)
-    val Secondary = Color(0xFF5F5F66)
-    val Tile = Color(0xFFFFFFFF)
-    val Control = Color(0xFFE1E1E6)
-    val Divider = Color(0xFFD3D3D8)
-    val Placeholder = Color(0xFFD8D8DE)
+    val Secondary = Color(0xFF46464C)
+    val Tile = Color(0xFFDCDCE0)
+    val Control = Color(0xFFCDCDD2)
+    val Divider = Color(0xFFA4A4AA)
+    val Placeholder = Color(0xFFADADB3)
 }
 
 @Composable
@@ -46,6 +50,8 @@ object Icons {
     val Subtitles = stroke("M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M7 12h3 M12 12h5 M7 15.5h6 M15 15.5h2")
     val Audio = stroke("M4 9v6h4l5 4V5L8 9z M16.5 8.5a5 5 0 0 1 0 7")
     val Edit = stroke("M4 20h4L19 9l-4-4L4 16z M14 6l4 4")
+    val Previous = stroke("M16 6l-6 6 6 6 M8 6v12", width = 2f)
+    val Next = stroke("M8 6l6 6-6 6 M16 6v12", width = 2f)
     val Play = fill("M7 4.5v15l12.5-7.5z")
     val Pause = fill("M6 4h4v16H6z M14 4h4v16h-4z")
 
