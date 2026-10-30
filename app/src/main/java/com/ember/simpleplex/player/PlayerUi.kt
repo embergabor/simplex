@@ -45,7 +45,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.layout.ContentScale
 import kotlinx.coroutines.Dispatchers
@@ -176,9 +180,8 @@ fun PlayerScreen(
                     Key.MediaFastForward -> { scrub(e.nativeKeyEvent, 1); visible = true; true }
                     Key.MediaRewind -> { scrub(e.nativeKeyEvent, -1); visible = true; true }
                     else -> if (visible) false else {
-                        // Hidden controls: OK pauses, left/right start scrubbing, anything else shows the controls.
+                        // Hidden controls: left/right start scrubbing, anything else (OK too) just shows the controls.
                         when (e.key) {
-                            Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> player.togglePlay()
                             Key.DirectionLeft -> scrub(e.nativeKeyEvent, -1)
                             Key.DirectionRight -> scrub(e.nativeKeyEvent, 1)
                             else -> {}
@@ -231,8 +234,9 @@ fun PlayerScreen(
                     when (e.key) {
                         Key.DirectionLeft -> { scrub(e.nativeKeyEvent, -1); true }
                         Key.DirectionRight -> { scrub(e.nativeKeyEvent, 1); true }
+                        // OK jumps to the scrub position or resumes; pausing is the remote's play/pause button.
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                            if (scrubAt != null) commitScrub() else player.togglePlay()
+                            if (scrubAt != null) commitScrub() else if (!player.isPlaying) player.play()
                             true
                         }
                         else -> false
@@ -323,20 +327,19 @@ private fun Controls(
                     .background(Palette.Ink, CircleShape)
             )
             if (scrubAt != null) {
-                // Floats above the bar, over the title row and the video.
-                val thumbWidth = 192.dp
-                val thumbHeight = if (previews != null) 108.dp else 0.dp
+                // Floats above the bar, over the title row and the video. Measured without the bar's
+                // 20 dp height limit, centered on the playhead and kept inside the bar's width.
+                val barWidth = maxWidth
                 Column(
-                    Modifier
-                        .offset(
-                            x = (maxWidth * fraction - thumbWidth / 2).coerceIn(0.dp, maxWidth - thumbWidth),
-                            y = -(thumbHeight + 40.dp),
-                        )
-                        .width(thumbWidth),
+                    Modifier.layout { measurable, _ ->
+                        val p = measurable.measure(Constraints())
+                        val x = (barWidth.toPx() * fraction - p.width / 2f).coerceIn(0f, (barWidth.toPx() - p.width).coerceAtLeast(0f))
+                        layout(0, 0) { p.place(x.toInt(), -p.height - 18.dp.roundToPx()) }
+                    },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    if (previews != null) PreviewImage(previews, scrubAt, Modifier.size(thumbWidth, thumbHeight))
+                    if (previews != null) PreviewImage(previews, scrubAt, width = 224.dp)
                     Text(
                         formatDuration(scrubAt),
                         modifier = Modifier.background(Palette.Ink, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
@@ -388,19 +391,23 @@ private fun InfoLine(label: String, value: String) {
 }
 
 @Composable
-private fun PreviewImage(previews: PreviewThumbs, at: Long, modifier: Modifier) {
+private fun PreviewImage(previews: PreviewThumbs, at: Long, width: Dp) {
     val frame = previews.frameAt(at)
     // Keeps showing the previous frame until the next one is decoded, so scrubbing doesn't flicker.
     val image by produceState<ImageBitmap?>(null, frame) {
         value = withContext(Dispatchers.IO) { previews.image(frame) } ?: value
     }
+    // Sized from the thumbnail itself (16:9, 4:3, ...); 16:9 until the first one is decoded.
+    val aspect = image?.let { it.width.toFloat() / it.height } ?: (16f / 9f)
     Box(
-        modifier
+        Modifier
+            .width(width)
+            .aspectRatio(aspect)
             .clip(RoundedCornerShape(8.dp))
             .background(Color.Black)
             .border(2.dp, Color.White, RoundedCornerShape(8.dp)),
     ) {
-        image?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+        image?.let { Image(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()) }
     }
 }
 

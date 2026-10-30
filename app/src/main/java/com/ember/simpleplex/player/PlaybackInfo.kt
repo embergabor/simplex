@@ -48,7 +48,7 @@ object Describe {
             else -> "SDR"
         }
         return listOfNotNull(
-            if (s.width != null && s.height != null) "${s.width}×${s.height}" else null,
+            if (s.width != null && s.height != null) "${s.width}×${s.height}${scan(s.scanType)}" else null,
             s.frameRate?.let { "${fps(it)} fps" },
             range,
         ).joinToString(" · ")
@@ -67,6 +67,12 @@ object Describe {
             else -> " → passthrough"
         }
         return source + converted + out
+    }
+
+    private fun scan(type: String?) = when (type?.lowercase()) {
+        "progressive" -> "p"
+        "interlaced" -> "i"
+        else -> ""
     }
 
     fun codecName(codec: String?, profile: String? = null): String = when (codec?.lowercase()) {

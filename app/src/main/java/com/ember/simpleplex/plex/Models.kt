@@ -22,6 +22,7 @@ data class Item(
     val duration: Long,
     val leafCount: Int,
     val viewedLeafCount: Int,
+    val librarySectionId: String?,
     val media: List<Media>,
 ) {
     val isEpisode get() = type == "episode"
@@ -68,6 +69,8 @@ data class Stream(
     val width: Int?,
     val height: Int?,
     val frameRate: Float?,
+    /** "progressive" or "interlaced". */
+    val scanType: String?,
     /** Transfer function: "smpte2084" (PQ, HDR10), "arib-std-b67" (HLG), else SDR. */
     val colorTrc: String?,
     /** Dolby Vision profile, when the video has Dolby Vision. */
@@ -132,6 +135,7 @@ internal fun parseItem(o: JSONObject) = Item(
     duration = o.long("duration") ?: 0,
     leafCount = o.int("leafCount") ?: 0,
     viewedLeafCount = o.int("viewedLeafCount") ?: 0,
+    librarySectionId = o.str("librarySectionID"),
     media = o.optJSONArray("Media").objects().map { m ->
         Media(
             parts = m.optJSONArray("Part").objects().map { p ->
@@ -161,6 +165,7 @@ private fun parseStream(s: JSONObject) = Stream(
     width = s.int("width"),
     height = s.int("height"),
     frameRate = s.str("frameRate")?.toFloatOrNull(),
+    scanType = s.str("scanType"),
     colorTrc = s.str("colorTrc"),
     doviProfile = if (s.bool("DOVIPresent")) s.int("DOVIProfile") ?: 0 else null,
     channels = s.int("channels"),

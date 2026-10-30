@@ -10,13 +10,14 @@ class DescribeTest {
 
     private fun stream(
         type: Int, codec: String, profile: String? = null, title: String = "English",
-        width: Int? = null, height: Int? = null, fps: Float? = null, trc: String? = null, dovi: Int? = null, channels: Int? = null,
-    ) = Stream(1, type, codec, profile, 0, "eng", title, true, false, null, null, width, height, fps, trc, dovi, channels)
+        width: Int? = null, height: Int? = null, fps: Float? = null, scan: String? = null, trc: String? = null, dovi: Int? = null, channels: Int? = null,
+    ) = Stream(1, type, codec, profile, 0, "eng", title, true, false, null, null, width, height, fps, scan, trc, dovi, channels)
 
     @Test fun video() {
         assertEquals("3840×2160 · 23.976 fps · Dolby Vision P8", Describe.video(stream(1, "hevc", width = 3840, height = 2160, fps = 23.976f, trc = "smpte2084", dovi = 8)))
         assertEquals("3840×2160 · 24 fps · HDR10", Describe.video(stream(1, "hevc", width = 3840, height = 2160, fps = 24f, trc = "smpte2084")))
-        assertEquals("1920×1080 · 25 fps · SDR", Describe.video(stream(1, "h264", width = 1920, height = 1080, fps = 25f)))
+        assertEquals("1280×720p · 25 fps · SDR", Describe.video(stream(1, "h264", width = 1280, height = 720, fps = 25f, scan = "progressive")))
+        assertEquals("1920×1080i · 25 fps · SDR", Describe.video(stream(1, "h264", width = 1920, height = 1080, fps = 25f, scan = "interlaced")))
         assertEquals("720×576 · 25 fps · SDR", Describe.video(stream(1, "mpeg2video", width = 720, height = 576, fps = 25f)))
     }
 

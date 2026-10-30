@@ -21,6 +21,13 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -124,8 +131,16 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
     val memory = rememberFocusMemory()
     var menuFor by remember { mutableStateOf<Item?>(null) }
 
-    val libraries = libs?.getOrElse { return Message("Couldn't reach your Plex server.\n${it.message}") } ?: return
-    val continuing = cont?.getOrNull() ?: if (cont == null) return else emptyList()
+    val context = LocalContext.current
+    val prefs = remember { LibraryPrefs(context) }
+    var hidden by remember { mutableStateOf(prefs.hidden) }
+    var editing by remember { mutableStateOf(false) }
+
+    val allLibraries = libs?.getOrElse { return Message("Couldn't reach your Plex server.\n${it.message}") } ?: return
+    val libraries = allLibraries.filter { it.key !in hidden }
+    // Hiding a library also hides what you were watching in it.
+    val continuing = (cont?.getOrNull() ?: if (cont == null) return else emptyList())
+        .filter { it.librarySectionId == null || it.librarySectionId !in hidden }
 
     Column(Modifier.fillMaxSize().padding(vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
         if (continuing.isNotEmpty()) {
@@ -153,8 +168,11 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
         }
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SectionTitle("Libraries", Modifier.padding(horizontal = 48.dp))
-            Row(Modifier.padding(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                libraries.forEachIndexed { i, lib ->
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 48.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+            ) {
+                itemsIndexed(libraries, key = { _, lib -> lib.key }) { i, lib ->
                     IconTile(
                         icon = when (lib.kind) {
                             Library.Kind.MOVIES -> Icons.Film
@@ -169,10 +187,53 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                             .remembersFocus(memory, "l" + lib.key, default = continuing.isEmpty() && i == 0),
                     )
                 }
+                item(key = "edit") {
+                    IconTile(
+                        icon = Icons.Edit,
+                        label = "Edit",
+                        onClick = { editing = true },
+                        modifier = Modifier.size(108.dp, 108.dp).remembersFocus(memory, "edit", default = allLibraries.isEmpty()),
+                    )
+                }
             }
         }
     }
     menuFor?.let { ItemMenu(plex, it, nav) { menuFor = null } }
+    if (editing) {
+        LibraryEditor(allLibraries, hidden, onToggle = { key ->
+            hidden = if (key in hidden) hidden - key else hidden + key
+            prefs.hidden = hidden
+        }) { editing = false }
+    }
+}
+
+/** Show or hide libraries on the home screen. Hidden ones keep their place for when they come back. */
+@Composable
+private fun LibraryEditor(libraries: List<Library>, hidden: Set<String>, onToggle: (String) -> Unit, onDone: () -> Unit) {
+    val first = remember { FocusRequester() }
+    Dialog(onDismissRequest = onDone) {
+        Column(
+            Modifier.width(380.dp).background(Palette.Tile, RoundedCornerShape(14.dp)).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("Libraries on Home", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp))
+            Text("Checked libraries are shown. Press Back when you're done.", fontSize = 12.sp, color = Palette.Secondary, modifier = Modifier.padding(start = 4.dp))
+            LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                itemsIndexed(libraries, key = { _, lib -> lib.key }) { i, lib ->
+                    PillButton(
+                        label = lib.title,
+                        selected = lib.key !in hidden,
+                        onClick = { onToggle(lib.key) },
+                        modifier = Modifier.fillMaxWidth().then(if (i == 0) Modifier.focusRequester(first) else Modifier),
+                    )
+                }
+            }
+        }
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            runCatching { first.requestFocus() }
+        }
+    }
 }
 
 // --- Movies / TV shows grid ---
