@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "SimplePlex"
+rootProject.name = "Simplex"
 include(":app")

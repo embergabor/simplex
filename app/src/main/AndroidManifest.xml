@@ -7,8 +7,8 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <application
-        android:label="Simple Plex"
-        android:icon="@drawable/banner"
+        android:label="Simplex"
+        android:icon="@drawable/icon"
         android:banner="@drawable/banner"
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

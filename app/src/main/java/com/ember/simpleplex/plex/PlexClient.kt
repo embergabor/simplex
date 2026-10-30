@@ -255,7 +255,7 @@ class PlexClient private constructor(context: Context) {
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     companion object {
-        const val PRODUCT = "Simple Plex"
+        const val PRODUCT = "Simplex"
         private const val PLEX_TV = "https://plex.tv/api/v2"
 
         @Volatile private var instance: PlexClient? = null
