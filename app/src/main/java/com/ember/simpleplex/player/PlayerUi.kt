@@ -200,13 +200,20 @@ fun PlayerScreen(
                         setStyle(
                             CaptionStyleCompat(
                                 android.graphics.Color.WHITE, android.graphics.Color.TRANSPARENT,
-                                android.graphics.Color.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
+                                android.graphics.Color.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_OUTLINE,
                                 android.graphics.Color.BLACK, null,
                             )
                         )
                         setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 1.1f)
                     }
                 }
+            },
+            // While the controls are open, text subtitles sit above the control panel instead of behind it.
+            update = { view ->
+                val controlsShown = visible && item != null && error == null
+                view.subtitleView?.setBottomPaddingFraction(
+                    if (controlsShown) 0.38f else SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION
+                )
             },
             modifier = Modifier.fillMaxSize(),
         )
