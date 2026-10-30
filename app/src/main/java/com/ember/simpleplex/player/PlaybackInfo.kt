@@ -48,6 +48,7 @@ object Describe {
             else -> "SDR"
         }
         return listOfNotNull(
+            videoCodecName(s.codec),
             if (s.width != null && s.height != null) "${s.width}×${s.height}${scan(s.scanType)}" else null,
             s.frameRate?.let { "${fps(it)} fps" },
             range,
@@ -92,6 +93,22 @@ object Describe {
         "vorbis" -> "Vorbis"
         null -> "?"
         else -> if (codec.startsWith("pcm")) "PCM" else codec.uppercase()
+    }
+
+    fun videoCodecName(codec: String?): String = when (codec?.lowercase()) {
+        "h264", "avc" -> "H.264"
+        "hevc", "h265" -> "HEVC"
+        "mpeg2video" -> "MPEG-2"
+        "mpeg1video" -> "MPEG-1"
+        "vc1" -> "VC-1"
+        "wmv3", "wmv2", "wmv1" -> "WMV"
+        "mpeg4" -> "MPEG-4"
+        "msmpeg4v3", "msmpeg4v2" -> "DivX 3"
+        "av1" -> "AV1"
+        "vp9" -> "VP9"
+        "vp8" -> "VP8"
+        null -> "?"
+        else -> codec.uppercase()
     }
 
     fun subtitleCodec(codec: String?): String = when (codec?.lowercase()) {

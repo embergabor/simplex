@@ -14,11 +14,12 @@ class DescribeTest {
     ) = Stream(1, type, codec, profile, 0, "eng", title, true, false, null, null, width, height, fps, scan, trc, dovi, channels)
 
     @Test fun video() {
-        assertEquals("3840×2160 · 23.976 fps · Dolby Vision P8", Describe.video(stream(1, "hevc", width = 3840, height = 2160, fps = 23.976f, trc = "smpte2084", dovi = 8)))
-        assertEquals("3840×2160 · 24 fps · HDR10", Describe.video(stream(1, "hevc", width = 3840, height = 2160, fps = 24f, trc = "smpte2084")))
-        assertEquals("1280×720p · 25 fps · SDR", Describe.video(stream(1, "h264", width = 1280, height = 720, fps = 25f, scan = "progressive")))
-        assertEquals("1920×1080i · 25 fps · SDR", Describe.video(stream(1, "h264", width = 1920, height = 1080, fps = 25f, scan = "interlaced")))
-        assertEquals("720×576 · 25 fps · SDR", Describe.video(stream(1, "mpeg2video", width = 720, height = 576, fps = 25f)))
+        assertEquals("HEVC · 3840×2160 · 23.976 fps · Dolby Vision P8", Describe.video(stream(1, "hevc", width = 3840, height = 2160, fps = 23.976f, trc = "smpte2084", dovi = 8)))
+        assertEquals("HEVC · 3840×2160 · 24 fps · HDR10", Describe.video(stream(1, "hevc", width = 3840, height = 2160, fps = 24f, trc = "smpte2084")))
+        assertEquals("H.264 · 1280×720p · 25 fps · SDR", Describe.video(stream(1, "h264", width = 1280, height = 720, fps = 25f, scan = "progressive")))
+        assertEquals("H.264 · 1920×1080i · 25 fps · SDR", Describe.video(stream(1, "h264", width = 1920, height = 1080, fps = 25f, scan = "interlaced")))
+        assertEquals("VC-1 · 1920×1080p · 23.976 fps · SDR", Describe.video(stream(1, "vc1", width = 1920, height = 1080, fps = 23.976f, scan = "progressive")))
+        assertEquals("MPEG-2 · 720×576 · 25 fps · SDR", Describe.video(stream(1, "mpeg2video", width = 720, height = 576, fps = 25f)))
     }
 
     @Test fun audioPassthroughAndDecoded() {
