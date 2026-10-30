@@ -2,6 +2,7 @@
 
 package com.ember.simpleplex.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,7 +51,6 @@ import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
-import androidx.tv.material3.Glow
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
@@ -133,8 +133,14 @@ fun Message(text: String) {
 
 private val cardShape = RoundedCornerShape(8.dp)
 
+/**
+ * The focused item gets a dark ring with a small gap around it. Drawn as a plain outline: the blurred
+ * glow it replaces was hard to see on the light background and costly to animate on the TV.
+ */
 @Composable
-private fun cardGlow() = CardDefaults.glow(focusedGlow = Glow(Color.Black.copy(alpha = 0.35f), 12.dp))
+private fun focusRing(cornerRadius: androidx.compose.ui.unit.Dp) = CardDefaults.border(
+    focusedBorder = Border(BorderStroke(3.dp, Palette.Ink), inset = 4.dp, shape = RoundedCornerShape(cornerRadius + 4.dp)),
+)
 
 @Composable
 private fun Artwork(url: String?, fallback: String) {
@@ -180,9 +186,8 @@ private fun ArtCard(
         onLongClick = onLongClick,
         modifier = modifier.fillMaxWidth().aspectRatio(aspect),
         shape = CardDefaults.shape(cardShape),
-        scale = CardDefaults.scale(focusedScale = 1.08f),
-        border = CardDefaults.border(focusedBorder = Border.None),
-        glow = cardGlow(),
+        scale = CardDefaults.scale(focusedScale = 1.1f),
+        border = focusRing(8.dp),
         colors = CardDefaults.colors(containerColor = Palette.Placeholder),
     ) {
         Box(Modifier.fillMaxSize()) {
@@ -260,9 +265,8 @@ fun IconTile(
         onClick = onClick,
         modifier = modifier,
         shape = CardDefaults.shape(RoundedCornerShape(12.dp)),
-        scale = CardDefaults.scale(focusedScale = 1.06f),
-        border = CardDefaults.border(focusedBorder = Border.None),
-        glow = cardGlow(),
+        scale = CardDefaults.scale(focusedScale = 1.08f),
+        border = focusRing(12.dp),
         colors = CardDefaults.colors(containerColor = Palette.Tile, focusedContainerColor = Palette.Tile),
     ) {
         if (horizontal) {

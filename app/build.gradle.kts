@@ -16,8 +16,12 @@ android {
     }
 
     buildTypes {
+        // The build that goes on the TV. Debug builds run Compose unoptimized, which makes focus
+        // moves and scrolling stutter on the TV's slow CPU.
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             signingConfig = signingConfigs.getByName("debug")
         }
     }
