@@ -6,7 +6,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.audio.AudioCapabilities
 import com.ember.simpleplex.plex.Part
 import com.ember.simpleplex.plex.Stream
 
@@ -46,23 +45,37 @@ object PlexTracks {
     /** Best compatibility track first: lossless DTS-HD, then E-AC3, DTS, AC3. */
     private val compatRank = mapOf(C.ENCODING_DTS_HD to 4, C.ENCODING_E_AC3 to 3, C.ENCODING_DTS to 2, C.ENCODING_AC3 to 1)
 
-    data class AudioPlan(val stream: Stream?, val convert: Boolean)
+    enum class AudioChoice {
+        /** Play the stream as it is: passed through, or stereo anyway. */
+        PLAY,
+
+        /** Only stereo would reach the receiver: ask whether Plex should convert it to surround. */
+        ASK,
+    }
+
+    data class AudioPlan(val stream: Stream?, val choice: AudioChoice)
 
     /**
-     * TrueHD the TV can't pass through: use a same-language track that it can (the file's compatibility
-     * track), otherwise have Plex convert just the audio. Everything else plays as chosen.
+     * Multichannel audio this TV can't pass through as a bitstream (LPCM, TrueHD, FLAC, AAC, Opus 5.1/7.1)
+     * would be decoded here, and the TV only outputs stereo PCM to the receiver.
      */
-    fun planAudio(part: Part, chosen: Stream?, caps: AudioCapabilities): AudioPlan {
-        if (chosen == null || encoding(chosen) != C.ENCODING_DOLBY_TRUEHD || caps.supportsEncoding(C.ENCODING_DOLBY_TRUEHD)) {
-            return AudioPlan(chosen, convert = false)
-        }
+    fun reachesAsStereo(s: Stream, passthrough: (Int) -> Boolean): Boolean =
+        (s.channels ?: 2) > 2 && encoding(s)?.let(passthrough) != true
+
+    /**
+     * Audio that would only reach the receiver as stereo: use a same-language track that passes through
+     * (the file's compatibility track), otherwise ask. Everything else plays as chosen.
+     */
+    fun planAudio(part: Part, chosen: Stream?, passthrough: (Int) -> Boolean): AudioPlan {
+        if (chosen == null || !reachesAsStereo(chosen, passthrough)) return AudioPlan(chosen, AudioChoice.PLAY)
         val compat = audioStreams(part)
             .filter { it.id != chosen.id && it.languageCode == chosen.languageCode }
-            .mapNotNull { s -> encoding(s)?.takeIf { it in compatRank && caps.supportsEncoding(it) }?.let { s to compatRank.getValue(it) } }
+            .mapNotNull { s -> encoding(s)?.takeIf { it in compatRank && passthrough(it) }?.let { s to compatRank.getValue(it) } }
             .maxByOrNull { it.second }
             ?.first
-        return if (compat != null) AudioPlan(compat, convert = false) else AudioPlan(chosen, convert = true)
+        return if (compat != null) AudioPlan(compat, AudioChoice.PLAY) else AudioPlan(chosen, AudioChoice.ASK)
     }
+
     fun subtitleStreams(part: Part) = part.streams.filter { it.streamType == 3 }
 
     /** The subtitle to show when the viewer chose none: a forced track in the audio's language. */

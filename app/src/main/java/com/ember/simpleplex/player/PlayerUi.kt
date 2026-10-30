@@ -101,6 +101,8 @@ fun PlayerScreen(
     info: PlaybackInfo,
     onAudio: (Stream) -> Unit,
     onSubtitle: (Stream?) -> Unit,
+    surroundQuestion: String?,
+    onSurroundAnswer: (Boolean) -> Unit,
     askBurn: Boolean,
     onBurnAnswer: (Boolean) -> Unit,
 ) {
@@ -241,6 +243,7 @@ fun PlayerScreen(
         }
     }
 
+    if (surroundQuestion != null) SurroundQuestion(surroundQuestion, onSurroundAnswer)
     if (askBurn) BurnQuestion(onBurnAnswer)
 
     when (picker) {
@@ -405,7 +408,32 @@ private fun PreviewImage(previews: PreviewThumbs, at: Long, width: Dp) {
     }
 }
 
-/** TrueHD this TV can't play: Plex converts the audio, and subtitles only survive that burned in. */
+/** Audio that would only reach the receiver as stereo. [what] is e.g. "TrueHD 7.1". Back means stereo. */
+@Composable
+private fun SurroundQuestion(what: String, onAnswer: (Boolean) -> Unit) {
+    val focus = remember { FocusRequester() }
+    Dialog(onDismissRequest = { onAnswer(false) }) {
+        Column(
+            Modifier.width(420.dp).background(Palette.Tile, RoundedCornerShape(14.dp)).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("Surround or stereo?", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp))
+            Text(
+                "This TV can only send $what audio to the receiver as stereo. Plex can convert just the audio " +
+                    "to 5.1 surround (the video stays untouched), or the file plays directly in stereo.",
+                fontSize = 12.sp, color = Palette.Secondary, modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            PillButton("Surround (Plex converts the audio)", { onAnswer(true) }, Modifier.fillMaxWidth().focusRequester(focus))
+            PillButton("Stereo (direct play)", { onAnswer(false) }, Modifier.fillMaxWidth())
+        }
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            runCatching { focus.requestFocus() }
+        }
+    }
+}
+
+/** Plex converts the audio, and subtitles only survive that burned in. */
 @Composable
 private fun BurnQuestion(onAnswer: (Boolean) -> Unit) {
     val focus = remember { FocusRequester() }
@@ -416,7 +444,7 @@ private fun BurnQuestion(onAnswer: (Boolean) -> Unit) {
         ) {
             Text("Subtitles for this file", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp))
             Text(
-                "This TV can't play the file's TrueHD audio, so Plex converts it. Subtitles can only be " +
+                "Plex is converting this file's audio, and subtitles can only be " +
                     "kept by burning them into the picture, which means Plex converts the video too.",
                 fontSize = 12.sp, color = Palette.Secondary, modifier = Modifier.padding(horizontal = 4.dp),
             )

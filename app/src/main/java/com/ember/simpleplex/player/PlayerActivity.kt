@@ -72,6 +72,10 @@ class PlayerActivity : ComponentActivity() {
     private var burning = false
     private val burnQuestion = mutableStateOf<CompletableDeferred<Boolean>?>(null)
 
+    /** Surround via Plex (true) or stereo direct play (false), per audio stream of the current item. */
+    private val surroundChoice = mutableMapOf<Long, Boolean>()
+    private val surroundQuestion = mutableStateOf<Pair<String, CompletableDeferred<Boolean>>?>(null)
+
     private val current = mutableStateOf<Item?>(null)
     private val audio = mutableStateOf<Stream?>(null)
     private val subtitle = mutableStateOf<Stream?>(null)
@@ -147,6 +151,8 @@ class PlayerActivity : ComponentActivity() {
                         input = audioInput.value,
                         output = audioOutput.value,
                     ),
+                    surroundQuestion = surroundQuestion.value?.first,
+                    onSurroundAnswer = { surroundQuestion.value?.second?.complete(it) },
                     askBurn = burnQuestion.value != null,
                     onBurnAnswer = { burnQuestion.value?.complete(it) },
                 )
@@ -235,13 +241,14 @@ class PlayerActivity : ComponentActivity() {
             previewJob = launch { previews.value = PreviewThumbs.load(plex, part, cacheDir) }
             triedAudioOnly = false
             burnChoice = null
+            surroundChoice.clear()
             val chosen = PlexTracks.audioStreams(part).let { s -> s.firstOrNull { it.selected } ?: s.firstOrNull() }
-            val plan = PlexTracks.planAudio(part, chosen, caps)
+            val plan = PlexTracks.planAudio(part, chosen, caps::supportsEncoding)
             audio.value = plan.stream
             subtitle.value = PlexTracks.subtitleStreams(part).firstOrNull { it.selected }
 
             val start = if (fromStart) 0L else item.viewOffset
-            if (plan.convert) playAudioConverted(start) else playDirect(item, part, start)
+            if (wantsSurround(plan)) playAudioConverted(start) else playDirect(item, part, start)
         }
     }
 
@@ -279,14 +286,14 @@ class PlayerActivity : ComponentActivity() {
     private fun chooseAudio(s: Stream) {
         val item = current.value ?: return
         val part = item.part ?: return
-        val plan = PlexTracks.planAudio(part, s, caps)
+        val plan = PlexTracks.planAudio(part, s, caps::supportsEncoding)
         audio.value = plan.stream
         val position = positionMs()
         lifecycleScope.launch {
             // Remember the viewer's pick on the server; Plex converts whichever track is selected there.
             runCatching { plex.selectStreams(part.id, s.id, null) }
             when {
-                plan.convert -> playAudioConverted(position)
+                wantsSurround(plan) -> playAudioConverted(position)
                 converted -> playDirect(item, part, position)
                 else -> PlexTracks.apply(player, part, plan.stream, subtitle.value)
             }
@@ -305,6 +312,21 @@ class PlayerActivity : ComponentActivity() {
                 burnChoice = null
                 playAudioConverted(positionMs())
             }
+        }
+    }
+
+    /** For audio that would only reach the receiver as stereo, asks (once per track) about surround. */
+    private suspend fun wantsSurround(plan: PlexTracks.AudioPlan): Boolean {
+        val s = plan.stream ?: return false
+        if (plan.choice != PlexTracks.AudioChoice.ASK) return false
+        surroundChoice[s.id]?.let { return it }
+        player.pause()
+        val answer = CompletableDeferred<Boolean>()
+        val what = "${Describe.codecName(s.codec, s.profile)} ${s.channels?.let(Describe::channels) ?: ""}".trim()
+        surroundQuestion.value = what to answer
+        return answer.await().also {
+            surroundChoice[s.id] = it
+            surroundQuestion.value = null
         }
     }
 
