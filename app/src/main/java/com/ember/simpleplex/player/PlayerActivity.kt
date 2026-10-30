@@ -37,7 +37,6 @@ import com.ember.simpleplex.plex.PlexClient
 import com.ember.simpleplex.plex.Stream
 import com.ember.simpleplex.ui.AppTheme
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
@@ -46,7 +45,8 @@ import kotlinx.coroutines.launch
 /**
  * Plays a queue of Plex items. Files are played as they are (direct play); the TV's own decoder handles
  * deinterlacing, and audio goes out as a bitstream when the TV/receiver accept it, else it's decoded here
- * (FFmpeg for TrueHD/DTS). Only if neither works does Plex convert the audio, never the video.
+ * (FFmpeg for TrueHD/DTS). TrueHD without a compatibility track, or audio that can't play at all, is
+ * converted by Plex instead, which may convert the video too (always when burning in a subtitle).
  */
 @OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
@@ -68,17 +68,15 @@ class PlayerActivity : ComponentActivity() {
     private var timeBase = 0L
     private var converted = false
     private var tracksApplied = false
-    private var triedAudioOnly = false
+    private var triedConversion = false
     private var loadJob: Job? = null
 
-    /** Burning subtitles into a converted stream: the viewer's answer for the current item, if asked. */
-    private var burnChoice: Boolean? = null
+    /** Whether the converted stream has the selected subtitle burned in. */
     private var burning = false
-    private val burnQuestion = mutableStateOf<CompletableDeferred<Boolean>?>(null)
 
-    /** Surround via Plex (true) or stereo direct play (false), per audio stream of the current item. */
-    private val surroundChoice = mutableMapOf<Long, Boolean>()
-    private val surroundQuestion = mutableStateOf<Pair<String, CompletableDeferred<Boolean>>?>(null)
+    /** A short note over the video, e.g. audio this TV can't play as surround. */
+    private val warning = mutableStateOf<String?>(null)
+    private var warningJob: Job? = null
 
     private val current = mutableStateOf<Item?>(null)
     private val audio = mutableStateOf<Stream?>(null)
@@ -155,10 +153,7 @@ class PlayerActivity : ComponentActivity() {
                         input = audioInput.value,
                         output = audioOutput.value,
                     ),
-                    surroundQuestion = surroundQuestion.value?.first,
-                    onSurroundAnswer = { surroundQuestion.value?.second?.complete(it) },
-                    askBurn = burnQuestion.value != null,
-                    onBurnAnswer = { burnQuestion.value?.complete(it) },
+                    warning = warning.value,
                     onPrevious = { skip(-1) }.takeIf { canPrevious.value },
                     onNext = { skip(1) }.takeIf { canNext.value },
                 )
@@ -247,16 +242,15 @@ class PlayerActivity : ComponentActivity() {
             previews.value = null
             previewJob?.cancel()
             previewJob = launch { previews.value = PreviewThumbs.load(plex, part, cacheDir) }
-            triedAudioOnly = false
-            burnChoice = null
-            surroundChoice.clear()
+            triedConversion = false
             val chosen = PlexTracks.audioStreams(part).let { s -> s.firstOrNull { it.selected } ?: s.firstOrNull() }
             val plan = PlexTracks.planAudio(part, chosen, caps::supportsEncoding)
             audio.value = plan.stream
             subtitle.value = PlexTracks.subtitleStreams(part).firstOrNull { it.selected }
 
             val start = if (fromStart) 0L else item.viewOffset
-            if (wantsSurround(plan)) playAudioConverted(start) else playDirect(item, part, start)
+            warnAbout(plan)
+            if (plan.choice == PlexTracks.AudioChoice.CONVERT) playConverted(start) else playDirect(item, part, start)
         }
     }
 
@@ -300,8 +294,9 @@ class PlayerActivity : ComponentActivity() {
         lifecycleScope.launch {
             // Remember the viewer's pick on the server; Plex converts whichever track is selected there.
             runCatching { plex.selectStreams(part.id, s.id, null) }
+            warnAbout(plan)
             when {
-                wantsSurround(plan) -> playAudioConverted(position)
+                plan.choice == PlexTracks.AudioChoice.CONVERT -> playConverted(position)
                 converted -> playDirect(item, part, position)
                 else -> PlexTracks.apply(player, part, plan.stream, subtitle.value)
             }
@@ -316,36 +311,21 @@ class PlayerActivity : ComponentActivity() {
         lifecycleScope.launch {
             // Plex burns in whichever subtitle is selected on the server, so save the choice first.
             runCatching { plex.selectStreams(part.id, null, s?.id ?: 0) }
-            if (converted && (s != null || burning)) {
-                burnChoice = null
-                playAudioConverted(positionMs())
-            }
+            // A converted stream restarts: burned in when there's a subtitle, audio only when there isn't.
+            if (converted && (s != null || burning)) playConverted(positionMs())
         }
     }
 
-    /** For audio that would only reach the receiver as stereo, asks (once per track) about surround. */
-    private suspend fun wantsSurround(plan: PlexTracks.AudioPlan): Boolean {
-        val s = plan.stream ?: return false
-        if (plan.choice != PlexTracks.AudioChoice.ASK) return false
-        surroundChoice[s.id]?.let { return it }
-        player.pause()
-        val answer = CompletableDeferred<Boolean>()
+    /** Multichannel audio that will only play as stereo, with no compatibility track and no conversion. */
+    private fun warnAbout(plan: PlexTracks.AudioPlan) {
+        val s = plan.stream ?: return
+        if (plan.choice != PlexTracks.AudioChoice.WARN) return
         val what = "${Describe.codecName(s.codec, s.profile)} ${s.channels?.let(Describe::channels) ?: ""}".trim()
-        surroundQuestion.value = what to answer
-        return answer.await().also {
-            surroundChoice[s.id] = it
-            surroundQuestion.value = null
-        }
-    }
-
-    /** Asks once per item whether to burn subtitles into a converted stream. Back means no. */
-    private suspend fun askBurn(): Boolean {
-        burnChoice?.let { return it }
-        val answer = CompletableDeferred<Boolean>()
-        burnQuestion.value = answer
-        return answer.await().also {
-            burnChoice = it
-            burnQuestion.value = null
+        warningJob?.cancel()
+        warning.value = "Unsupported audio: $what"
+        warningJob = lifecycleScope.launch {
+            delay(6000)
+            warning.value = null
         }
     }
 
@@ -356,8 +336,8 @@ class PlayerActivity : ComponentActivity() {
             if (!tracksApplied) {
                 tracksApplied = true
                 PlexTracks.apply(player, part, audio.value, subtitle.value)
-            } else if (!triedAudioOnly && !converted && PlexTracks.audioUnplayable(tracks)) {
-                playAudioConverted(positionMs())
+            } else if (!triedConversion && !converted && PlexTracks.audioUnplayable(tracks)) {
+                playConverted(positionMs())
             }
         }
 
@@ -370,7 +350,7 @@ class PlayerActivity : ComponentActivity() {
         }
 
         override fun onPlayerError(e: PlaybackException) {
-            if (!triedAudioOnly && !converted && isAudioError(e)) playAudioConverted(positionMs())
+            if (!triedConversion && !converted && isAudioError(e)) playConverted(positionMs())
             else error.value = "Playback failed.\n${e.errorCodeName}: ${e.message}"
         }
     }
@@ -383,30 +363,34 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * Plex copies the video and converts only the audio, starting at [offset]. Subtitles can't come along
-     * in that stream, so if one is selected the viewer chooses: none, or burned in (Plex converts the video).
+     * Plex converts the audio, starting at [offset]. A selected subtitle is burned in, since it can't
+     * come along in that stream otherwise; Plex decides whether the video can be copied.
      */
-    private fun playAudioConverted(offset: Long) {
-        triedAudioOnly = true
+    private fun playConverted(offset: Long) {
+        triedConversion = true
         val item = current.value ?: return
         val part = item.part ?: return
         lifecycleScope.launch {
             player.pause()
-            val burn = subtitle.value != null && askBurn()
-            if (!burn) subtitle.value = null
-            val url = try {
-                plex.audioOnlyStream(item.ratingKey, offset, burn)
+            val burn = subtitle.value != null
+            val stream = try {
+                plex.convertedStream(item.ratingKey, offset, burn)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 player.stop()
-                error.value = "This file's audio can't be played on this TV, and Plex can't convert just the audio.\n${e.message}"
+                error.value = "This file's audio can't be played on this TV, and Plex couldn't convert it.\n${e.message}"
                 return@launch
             }
+            val url = stream.url
             timeBase = offset
             converted = true
             burning = burn
-            delivery.value = if (burn) Delivery.BURNING else Delivery.AUDIO_CONVERTED
+            delivery.value = when {
+                burn -> Delivery.BURNING
+                stream.videoCopied -> Delivery.AUDIO_CONVERTED
+                else -> Delivery.VIDEO_CONVERTED
+            }
             audioInput.value = null
             audioOutput.value = null
             tracksApplied = false

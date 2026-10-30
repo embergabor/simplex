@@ -34,11 +34,15 @@ class AudioTest {
         assertEquals(dtsHd, PlexTracks.planAudio(part(truehd, ac3, dtsHd), truehd, tv).stream)
     }
 
-    @Test fun asksWhenNothingPassesThrough() {
-        for (codec in listOf("pcm_s16le", "truehd", "flac", "aac", "opus")) {
-            val s = audio(codec, 6)
-            val plan = PlexTracks.planAudio(part(s), s, tv)
-            assertEquals(codec, PlexTracks.AudioChoice.ASK, plan.choice)
+    @Test fun plexConvertsTrueHdWithoutCompatTrack() {
+        val s = audio("truehd", 8)
+        assertEquals(PlexTracks.AudioChoice.CONVERT, PlexTracks.planAudio(part(s), s, tv).choice)
+    }
+
+    @Test fun warnsForOtherAudioThatOnlyPlaysAsStereo() {
+        for (codec in listOf("pcm_s16le", "flac", "aac", "opus")) {
+            val s = audio(codec, 8)
+            assertEquals(codec, PlexTracks.AudioChoice.WARN, PlexTracks.planAudio(part(s), s, tv).choice)
         }
     }
 

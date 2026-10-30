@@ -6,8 +6,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import com.ember.simpleplex.plex.Stream
 
-/** How the current file reaches the TV. */
-enum class Delivery { DIRECT, AUDIO_CONVERTED, BURNING }
+/** How the current file reaches the TV. VIDEO_CONVERTED: Plex chose to convert the video too, no subtitles. */
+enum class Delivery { DIRECT, AUDIO_CONVERTED, VIDEO_CONVERTED, BURNING }
 
 /** What actually goes out of the TV's audio output: a bitstream (passthrough) or decoded PCM. */
 data class AudioOutput(val encoding: Int, val channels: Int)
@@ -35,6 +35,7 @@ object Describe {
         markers = when (delivery) {
             Delivery.DIRECT -> listOf("Direct play")
             Delivery.AUDIO_CONVERTED -> listOf("Audio transcode")
+            Delivery.VIDEO_CONVERTED -> listOf("Audio transcode", "Video transcode")
             Delivery.BURNING -> listOf("Audio transcode", "Video transcode", "Subtitles burned in")
         },
     )

@@ -41,6 +41,7 @@ class DescribeTest {
         val info = Describe.info(null, null, stream(3, "hdmv_pgs_subtitle"), Delivery.BURNING, null, null)
         assertEquals("PGS", info.subtitle)
         assertEquals(listOf("Audio transcode", "Video transcode", "Subtitles burned in"), info.markers)
+        assertEquals(listOf("Audio transcode", "Video transcode"), Describe.info(null, null, null, Delivery.VIDEO_CONVERTED, null, null).markers)
         assertEquals("Off", Describe.info(null, null, null, Delivery.DIRECT, null, null).subtitle)
         assertEquals(listOf("Direct play"), Describe.info(null, null, null, Delivery.DIRECT, null, null).markers)
     }

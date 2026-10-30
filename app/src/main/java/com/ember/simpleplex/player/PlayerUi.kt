@@ -102,10 +102,7 @@ fun PlayerScreen(
     info: PlaybackInfo,
     onAudio: (Stream) -> Unit,
     onSubtitle: (Stream?) -> Unit,
-    surroundQuestion: String?,
-    onSurroundAnswer: (Boolean) -> Unit,
-    askBurn: Boolean,
-    onBurnAnswer: (Boolean) -> Unit,
+    warning: String?,
     /** Previous/next episode; null where there's none. */
     onPrevious: (() -> Unit)?,
     onNext: (() -> Unit)?,
@@ -225,6 +222,15 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
+        if (warning != null && error == null) {
+            Text(
+                warning,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 28.dp)
+                    .background(Color(0xCC1C1C1E), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+            )
+        }
         if (error != null) {
             Column(
                 Modifier.align(Alignment.Center).padding(48.dp),
@@ -258,8 +264,6 @@ fun PlayerScreen(
         }
     }
 
-    if (surroundQuestion != null) SurroundQuestion(surroundQuestion, onSurroundAnswer)
-    if (askBurn) BurnQuestion(onBurnAnswer)
 
     when (picker) {
         2 -> TrackPicker("Audio", audioOptions, audio, allowOff = false, onDismiss = { picker = null }) { onAudio(it!!) }
@@ -426,56 +430,6 @@ private fun PreviewImage(previews: PreviewThumbs, at: Long, width: Dp) {
             .border(2.dp, Color.White, RoundedCornerShape(8.dp)),
     ) {
         image?.let { Image(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()) }
-    }
-}
-
-/** Audio that would only reach the receiver as stereo. [what] is e.g. "TrueHD 7.1". Back means stereo. */
-@Composable
-private fun SurroundQuestion(what: String, onAnswer: (Boolean) -> Unit) {
-    val focus = remember { FocusRequester() }
-    Dialog(onDismissRequest = { onAnswer(false) }) {
-        Column(
-            Modifier.width(420.dp).background(Palette.Tile, RoundedCornerShape(14.dp)).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Surround or stereo?", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp))
-            Text(
-                "This TV can only send $what audio to the receiver as stereo. Plex can convert just the audio " +
-                    "to 5.1 surround (the video stays untouched), or the file plays directly in stereo.",
-                fontSize = 12.sp, color = Palette.Secondary, modifier = Modifier.padding(horizontal = 4.dp),
-            )
-            PillButton("Surround (Plex converts the audio)", { onAnswer(true) }, Modifier.fillMaxWidth().focusRequester(focus))
-            PillButton("Stereo (direct play)", { onAnswer(false) }, Modifier.fillMaxWidth())
-        }
-        LaunchedEffect(Unit) {
-            withFrameNanos { }
-            runCatching { focus.requestFocus() }
-        }
-    }
-}
-
-/** Plex converts the audio, and subtitles only survive that burned in. */
-@Composable
-private fun BurnQuestion(onAnswer: (Boolean) -> Unit) {
-    val focus = remember { FocusRequester() }
-    Dialog(onDismissRequest = { onAnswer(false) }) {
-        Column(
-            Modifier.width(420.dp).background(Palette.Tile, RoundedCornerShape(14.dp)).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Subtitles for this file", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp))
-            Text(
-                "Plex is converting this file's audio, and subtitles can only be " +
-                    "kept by burning them into the picture, which means Plex converts the video too.",
-                fontSize = 12.sp, color = Palette.Secondary, modifier = Modifier.padding(horizontal = 4.dp),
-            )
-            PillButton("No subtitles", { onAnswer(false) }, Modifier.fillMaxWidth().focusRequester(focus))
-            PillButton("Burn in subtitles", { onAnswer(true) }, Modifier.fillMaxWidth())
-        }
-        LaunchedEffect(Unit) {
-            withFrameNanos { }
-            runCatching { focus.requestFocus() }
-        }
     }
 }
 

@@ -213,13 +213,14 @@ class PlexClient private constructor(context: Context) {
         send("/library/parts/$partId?$params", "PUT")
     }
 
+    data class Converted(val url: String, val videoCopied: Boolean)
+
     /**
-     * Asks Plex for an HLS stream that copies the video untouched and converts only the audio, to 5.1
-     * E-AC3 or AC3 for passthrough. Throws with Plex's reason if Plex would have to convert the video
-     * too. The one exception is [burnSubtitles], which the viewer asked for: burning the selected
-     * subtitle into the picture means converting the video.
+     * Asks Plex for an HLS stream with the audio converted (to 5.1 E-AC3 or AC3, for passthrough) and,
+     * if [burnSubtitles], the selected subtitle burned in. Plex decides the rest: it copies the video
+     * when it can and converts it when it must (always when burning).
      */
-    suspend fun audioOnlyStream(ratingKey: String, offsetMs: Long, burnSubtitles: Boolean): String {
+    suspend fun convertedStream(ratingKey: String, offsetMs: Long, burnSubtitles: Boolean): Converted {
         val session = UUID.randomUUID().toString()
         // Plex starts from its built-in profile for the platform, whose HLS target only allows H.264 video
         // and stereo AAC audio. These extend that target instead of adding a second one (which Plex ignores).
@@ -266,10 +267,7 @@ class PlexClient private constructor(context: Context) {
             streams.joinToString { "${it.streamType}:${it.codec}/${it.channels ?: "-"}=${it.decision}" })
         val video = streams.firstOrNull { it.streamType == 1 }
             ?: throw IOException("Plex didn't offer a stream. $reason")
-        if (video.decision != "copy" && !burnSubtitles) {
-            throw IOException("Plex would have to convert the ${video.codec} video too. $reason")
-        }
-        return "$serverUri/video/:/transcode/universal/start.m3u8?$query"
+        return Converted("$serverUri/video/:/transcode/universal/start.m3u8?$query", video.decision == "copy")
     }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
