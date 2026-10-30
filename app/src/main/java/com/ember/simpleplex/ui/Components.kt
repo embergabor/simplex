@@ -42,6 +42,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.FocusRequester
@@ -397,9 +402,19 @@ fun ItemMenu(plex: PlexClient, item: Item, nav: Nav, onDismiss: () -> Unit) {
             onDismiss()
         }
     }
+    // The menu opens while OK is still held: the remote keeps repeating OK and then releases it, which
+    // would press the menu's first button and close it. OK only counts again after that release.
+    var armed by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss) {
         Column(
-            Modifier.width(320.dp).background(Palette.Tile, RoundedCornerShape(14.dp)).padding(20.dp),
+            Modifier
+                .onPreviewKeyEvent { e ->
+                    if (armed || e.key !in okKeys) return@onPreviewKeyEvent false
+                    if (e.type == KeyEventType.KeyUp) { armed = true; return@onPreviewKeyEvent true }
+                    // A fresh press means the hold already ended somewhere else.
+                    if (e.nativeKeyEvent.repeatCount == 0) { armed = true; false } else true
+                }
+                .width(320.dp).background(Palette.Tile, RoundedCornerShape(14.dp)).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Text(item.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp, bottom = 7.dp))
@@ -415,6 +430,8 @@ fun ItemMenu(plex: PlexClient, item: Item, nav: Nav, onDismiss: () -> Unit) {
         }
     }
 }
+
+private val okKeys = setOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)
 
 fun formatDuration(ms: Long): String {
     val total = ms / 1000
