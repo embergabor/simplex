@@ -13,6 +13,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.io.IOException
 import java.net.URLEncoder
 import java.util.UUID
@@ -182,6 +183,17 @@ class PlexClient private constructor(context: Context) {
 
     fun fileUrl(key: String) = "$serverUri$key${if ('?' in key) '&' else '?'}X-Plex-Token=$token"
 
+    /** Saves a server file (e.g. preview thumbnails) to [dest], via a temporary file so it's never half-written. */
+    suspend fun download(path: String, dest: File) = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(requireNotNull(serverUri) + path).plexHeaders(token).header("Accept", "*/*").build()
+        http.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) throw IOException("Plex answered ${r.code} for $path")
+            val tmp = File(dest.path + ".part")
+            tmp.outputStream().use { out -> r.body.byteStream().copyTo(out) }
+            if (!tmp.renameTo(dest)) throw IOException("Couldn't save $dest")
+        }
+    }
+
     // --- Playback state ---
 
     suspend fun timeline(ratingKey: String, state: String, timeMs: Long, durationMs: Long) =
@@ -202,9 +214,10 @@ class PlexClient private constructor(context: Context) {
 
     /**
      * Asks Plex for an HLS stream that copies the video untouched and converts only the audio.
-     * Returns null if Plex would have to convert the video too (which this app never allows).
+     * Returns null if Plex would have to convert the video too. The one exception is [burnSubtitles],
+     * which the viewer asked for: burning the selected subtitle into the picture means converting the video.
      */
-    suspend fun audioOnlyStream(ratingKey: String, offsetMs: Long): String? {
+    suspend fun audioOnlyStream(ratingKey: String, offsetMs: Long, burnSubtitles: Boolean): String? {
         val session = UUID.randomUUID().toString()
         val profile = "add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts" +
             "&videoCodec=h264,hevc,mpeg2video,vc1,vp9,av1&audioCodec=eac3,ac3)"
@@ -218,7 +231,7 @@ class PlexClient private constructor(context: Context) {
             "directPlay" to "0",
             "directStream" to "1",
             "directStreamAudio" to "0",
-            "subtitles" to "none",
+            "subtitles" to if (burnSubtitles) "burn" else "none",
             "videoQuality" to "100",
             "maxVideoBitrate" to "200000",
             "videoResolution" to "3840x2160",
@@ -235,7 +248,7 @@ class PlexClient private constructor(context: Context) {
 
         val decision = get("/video/:/transcode/universal/decision?$query")
         val video = decision.items().firstOrNull()?.part?.streams?.firstOrNull { it.streamType == 1 }
-        if (video?.decision != "copy") return null
+        if (video == null || (video.decision != "copy" && !burnSubtitles)) return null
         return "$serverUri/video/:/transcode/universal/start.m3u8?$query"
     }
 

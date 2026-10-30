@@ -5,6 +5,8 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.audio.AudioCapabilities
 import com.ember.simpleplex.plex.Part
 import com.ember.simpleplex.plex.Stream
 
@@ -12,6 +14,7 @@ import com.ember.simpleplex.plex.Stream
  * Maps Plex's audio/subtitle streams onto ExoPlayer's tracks.
  * Embedded streams line up by their order in the file; sidecar subtitles are found by the id we gave them.
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 object PlexTracks {
 
     fun externalId(streamId: Long) = "plex-ext-$streamId"
@@ -25,6 +28,41 @@ object PlexTracks {
     }
 
     fun audioStreams(part: Part) = part.streams.filter { it.streamType == 2 }
+
+    /** The bitstream format a Plex audio stream would be passed through as, or null if it's always decoded. */
+    private fun encoding(s: Stream): Int? {
+        val codec = s.codec?.lowercase()
+        val profile = s.profile?.lowercase()
+        return when {
+            codec == "truehd" -> C.ENCODING_DOLBY_TRUEHD
+            codec == "eac3" -> C.ENCODING_E_AC3
+            codec == "ac3" -> C.ENCODING_AC3
+            codec == "dca-ma" || (codec == "dca" && (profile == "ma" || profile == "hra")) -> C.ENCODING_DTS_HD
+            codec == "dca" || codec == "dts" -> C.ENCODING_DTS
+            else -> null
+        }
+    }
+
+    /** Best compatibility track first: lossless DTS-HD, then E-AC3, DTS, AC3. */
+    private val compatRank = mapOf(C.ENCODING_DTS_HD to 4, C.ENCODING_E_AC3 to 3, C.ENCODING_DTS to 2, C.ENCODING_AC3 to 1)
+
+    data class AudioPlan(val stream: Stream?, val convert: Boolean)
+
+    /**
+     * TrueHD the TV can't pass through: use a same-language track that it can (the file's compatibility
+     * track), otherwise have Plex convert just the audio. Everything else plays as chosen.
+     */
+    fun planAudio(part: Part, chosen: Stream?, caps: AudioCapabilities): AudioPlan {
+        if (chosen == null || encoding(chosen) != C.ENCODING_DOLBY_TRUEHD || caps.supportsEncoding(C.ENCODING_DOLBY_TRUEHD)) {
+            return AudioPlan(chosen, convert = false)
+        }
+        val compat = audioStreams(part)
+            .filter { it.id != chosen.id && it.languageCode == chosen.languageCode }
+            .mapNotNull { s -> encoding(s)?.takeIf { it in compatRank && caps.supportsEncoding(it) }?.let { s to compatRank.getValue(it) } }
+            .maxByOrNull { it.second }
+            ?.first
+        return if (compat != null) AudioPlan(compat, convert = false) else AudioPlan(chosen, convert = true)
+    }
     fun subtitleStreams(part: Part) = part.streams.filter { it.streamType == 3 }
 
     /** The subtitle to show when the viewer chose none: a forced track in the audio's language. */

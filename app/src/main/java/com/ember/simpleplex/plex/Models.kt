@@ -39,15 +39,23 @@ data class Item(
     val episodeLabel get() = if (isEpisode) "S${parentIndex ?: 0} · E${index ?: 0}" else null
 }
 
-data class Media(val videoFrameRate: String?, val parts: List<Part>)
+data class Media(val parts: List<Part>)
 
-data class Part(val id: Long, val key: String, val streams: List<Stream>)
+data class Part(
+    val id: Long,
+    val key: String,
+    val streams: List<Stream>,
+    /** Plex generated video preview thumbnails for this file. */
+    val previews: Boolean,
+)
 
 data class Stream(
     val id: Long,
     /** 1 = video, 2 = audio, 3 = subtitle. */
     val streamType: Int,
     val codec: String?,
+    /** Codec detail, e.g. "ma" for DTS-HD Master Audio. */
+    val profile: String?,
     val index: Int?,
     val languageCode: String?,
     val displayTitle: String,
@@ -55,10 +63,16 @@ data class Stream(
     val forced: Boolean,
     /** Set for subtitle files stored next to the video (sidecar files). */
     val key: String?,
-    val frameRate: Float?,
-    val scanType: String?,
     /** Only present in transcode decisions: "copy", "transcode", ... */
     val decision: String?,
+    val width: Int?,
+    val height: Int?,
+    val frameRate: Float?,
+    /** Transfer function: "smpte2084" (PQ, HDR10), "arib-std-b67" (HLG), else SDR. */
+    val colorTrc: String?,
+    /** Dolby Vision profile, when the video has Dolby Vision. */
+    val doviProfile: Int?,
+    val channels: Int?,
 ) {
     val isExternal get() = key != null
 }
@@ -120,12 +134,12 @@ internal fun parseItem(o: JSONObject) = Item(
     viewedLeafCount = o.int("viewedLeafCount") ?: 0,
     media = o.optJSONArray("Media").objects().map { m ->
         Media(
-            videoFrameRate = m.str("videoFrameRate"),
             parts = m.optJSONArray("Part").objects().map { p ->
                 Part(
                     id = p.long("id") ?: 0,
                     key = p.str("key") ?: "",
                     streams = p.optJSONArray("Stream").objects().map(::parseStream),
+                    previews = p.str("indexes")?.contains("sd") == true,
                 )
             },
         )
@@ -136,13 +150,18 @@ private fun parseStream(s: JSONObject) = Stream(
     id = s.long("id") ?: 0,
     streamType = s.int("streamType") ?: 0,
     codec = s.str("codec"),
+    profile = s.str("profile"),
     index = s.int("index"),
     languageCode = s.str("languageCode"),
     displayTitle = s.str("extendedDisplayTitle") ?: s.str("displayTitle") ?: s.str("language") ?: "Unknown",
     selected = s.bool("selected"),
     forced = s.bool("forced"),
     key = s.str("key"),
-    frameRate = s.str("frameRate")?.toFloatOrNull(),
-    scanType = s.str("scanType"),
     decision = s.str("decision"),
+    width = s.int("width"),
+    height = s.int("height"),
+    frameRate = s.str("frameRate")?.toFloatOrNull(),
+    colorTrc = s.str("colorTrc"),
+    doviProfile = if (s.bool("DOVIPresent")) s.int("DOVIProfile") ?: 0 else null,
+    channels = s.int("channels"),
 )

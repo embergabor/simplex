@@ -9,6 +9,7 @@ import androidx.annotation.OptIn
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.Format
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -18,7 +19,12 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlaybackException
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.audio.AudioCapabilities
 import com.ember.simpleplex.plex.Episodes
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Part
@@ -26,6 +32,7 @@ import com.ember.simpleplex.plex.PlexClient
 import com.ember.simpleplex.plex.Stream
 import com.ember.simpleplex.ui.AppTheme
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -40,7 +47,7 @@ class PlayerActivity : ComponentActivity() {
 
     private lateinit var plex: PlexClient
     private lateinit var player: ExoPlayer
-    private lateinit var modes: DisplayModeSwitcher
+    private lateinit var caps: AudioCapabilities
 
     private val queue = mutableListOf<String>()
     private var index = 0
@@ -49,21 +56,33 @@ class PlayerActivity : ComponentActivity() {
 
     /** Where the current stream starts within the file; non-zero only for Plex's audio-converted stream. */
     private var timeBase = 0L
+    private var converted = false
     private var tracksApplied = false
     private var triedAudioOnly = false
     private var loadJob: Job? = null
+
+    /** Burning subtitles into a converted stream: the viewer's answer for the current item, if asked. */
+    private var burnChoice: Boolean? = null
+    private var burning = false
+    private val burnQuestion = mutableStateOf<CompletableDeferred<Boolean>?>(null)
 
     private val current = mutableStateOf<Item?>(null)
     private val audio = mutableStateOf<Stream?>(null)
     private val subtitle = mutableStateOf<Stream?>(null)
     private val error = mutableStateOf<String?>(null)
+    private val previews = mutableStateOf<PreviewThumbs?>(null)
+    private val delivery = mutableStateOf(Delivery.DIRECT)
+    private val audioInput = mutableStateOf<AudioInput?>(null)
+    private val audioOutput = mutableStateOf<AudioOutput?>(null)
+    private var previewJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         plex = PlexClient.get(this)
-        modes = DisplayModeSwitcher(this)
+        // What the TV accepts as a bitstream on its current output (here: eARC to the receiver).
+        caps = AudioCapabilities.getCapabilities(this, AudioAttributes.DEFAULT, null)
         queue += intent.getStringArrayListExtra(EXTRA_KEYS).orEmpty()
         fromStart = intent.getBooleanExtra(EXTRA_FROM_START, false)
         shuffle = intent.getBooleanExtra(EXTRA_SHUFFLE, false)
@@ -80,8 +99,22 @@ class PlayerActivity : ComponentActivity() {
                 true,
             )
             .setHandleAudioBecomingNoisy(true)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setSubtitleParserFactory(SubtitleParsers()))
             .build()
         player.addListener(listener)
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioInputFormatChanged(
+                eventTime: AnalyticsListener.EventTime,
+                format: Format,
+                decoderReuseEvaluation: DecoderReuseEvaluation?,
+            ) {
+                audioInput.value = AudioInput(format.sampleMimeType, format.channelCount)
+            }
+
+            override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, config: AudioSink.AudioTrackConfig) {
+                audioOutput.value = AudioOutput(config.encoding, Describe.channelCount(config.channelConfig))
+            }
+        })
 
         setContent {
             AppTheme {
@@ -95,8 +128,22 @@ class PlayerActivity : ComponentActivity() {
                     subtitle = subtitle.value,
                     error = error.value,
                     position = ::positionMs,
+                    // A converted stream starts at timeBase, so it can't go earlier than that.
+                    seekTo = { player.seekTo((it - timeBase).coerceAtLeast(0)) },
+                    previews = previews.value,
                     onAudio = ::chooseAudio,
                     onSubtitle = ::chooseSubtitle,
+                    info = Describe.info(
+                        video = part?.streams?.firstOrNull { it.streamType == 1 },
+                        // While Plex converts, the source is what's selected on the server, not the fallback.
+                        audio = audio.value,
+                        subtitle = subtitle.value,
+                        delivery = delivery.value,
+                        input = audioInput.value,
+                        output = audioOutput.value,
+                    ),
+                    askBurn = burnQuestion.value != null,
+                    onBurnAnswer = { burnQuestion.value?.complete(it) },
                 )
             }
         }
@@ -149,28 +196,36 @@ class PlayerActivity : ComponentActivity() {
             }
 
             current.value = item
-            timeBase = 0
-            tracksApplied = false
+            previews.value = null
+            previewJob?.cancel()
+            previewJob = launch { previews.value = PreviewThumbs.load(plex, part, cacheDir) }
             triedAudioOnly = false
-            audio.value = PlexTracks.audioStreams(part).let { s -> s.firstOrNull { it.selected } ?: s.firstOrNull() }
+            burnChoice = null
+            val chosen = PlexTracks.audioStreams(part).let { s -> s.firstOrNull { it.selected } ?: s.firstOrNull() }
+            val plan = PlexTracks.planAudio(part, chosen, caps)
+            audio.value = plan.stream
             subtitle.value = PlexTracks.subtitleStreams(part).firstOrNull { it.selected }
 
-            val video = part.streams.firstOrNull { it.streamType == 1 }
-            modes.match(
-                fps = video?.frameRate ?: DisplayModeSwitcher.fpsFromLabel(item.media.firstOrNull()?.videoFrameRate),
-                interlaced = video?.scanType == "interlaced",
-            )
-
             val start = if (fromStart) 0L else item.viewOffset
-            player.setMediaItem(mediaItem(item, part, plex.fileUrl(part.key), hls = false), start)
-            player.prepare()
-            player.play()
+            if (plan.convert) playAudioConverted(start) else playDirect(item, part, start)
         }
+    }
+
+    private fun playDirect(item: Item, part: Part, startMs: Long) {
+        timeBase = 0
+        converted = false
+        delivery.value = Delivery.DIRECT
+        audioInput.value = null
+        audioOutput.value = null
+        tracksApplied = false
+        player.setMediaItem(mediaItem(item, part, plex.fileUrl(part.key), hls = false), startMs)
+        player.prepare()
+        player.play()
     }
 
     private fun mediaItem(item: Item, part: Part, url: String, hls: Boolean): MediaItem {
         // Sidecar subtitle files; a converted stream starts mid-file, so they'd be out of sync there.
-        val subs = if (hls) emptyList() else PlexTracks.subtitleStreams(part).filter { it.isExternal }.mapNotNull { s ->
+        val sidecars = if (hls) emptyList() else PlexTracks.subtitleStreams(part).filter { it.isExternal }.mapNotNull { s ->
             val mime = PlexTracks.subtitleMime(s.codec) ?: return@mapNotNull null
             MediaItem.SubtitleConfiguration.Builder(Uri.parse(plex.fileUrl(s.key!!)))
                 .setId(PlexTracks.externalId(s.id))
@@ -182,23 +237,52 @@ class PlayerActivity : ComponentActivity() {
         return MediaItem.Builder()
             .setUri(url)
             .setMediaId(item.ratingKey)
-            .setSubtitleConfigurations(subs)
+            .setSubtitleConfigurations(sidecars)
             .apply { if (hls) setMimeType(MimeTypes.APPLICATION_M3U8) }
             .build()
     }
 
     private fun chooseAudio(s: Stream) {
-        val part = current.value?.part ?: return
-        audio.value = s
-        PlexTracks.apply(player, part, s, subtitle.value)
-        plex.fire { selectStreams(part.id, s.id, null) }
+        val item = current.value ?: return
+        val part = item.part ?: return
+        val plan = PlexTracks.planAudio(part, s, caps)
+        audio.value = plan.stream
+        val position = positionMs()
+        lifecycleScope.launch {
+            // Remember the viewer's pick on the server; Plex converts whichever track is selected there.
+            runCatching { plex.selectStreams(part.id, s.id, null) }
+            when {
+                plan.convert -> playAudioConverted(position)
+                converted -> playDirect(item, part, position)
+                else -> PlexTracks.apply(player, part, plan.stream, subtitle.value)
+            }
+        }
     }
 
     private fun chooseSubtitle(s: Stream?) {
-        val part = current.value?.part ?: return
+        val item = current.value ?: return
+        val part = item.part ?: return
         subtitle.value = s
         PlexTracks.apply(player, part, audio.value, s)
-        plex.fire { selectStreams(part.id, null, s?.id ?: 0) }
+        lifecycleScope.launch {
+            // Plex burns in whichever subtitle is selected on the server, so save the choice first.
+            runCatching { plex.selectStreams(part.id, null, s?.id ?: 0) }
+            if (converted && (s != null || burning)) {
+                burnChoice = null
+                playAudioConverted(positionMs())
+            }
+        }
+    }
+
+    /** Asks once per item whether to burn subtitles into a converted stream. Back means no. */
+    private suspend fun askBurn(): Boolean {
+        burnChoice?.let { return it }
+        val answer = CompletableDeferred<Boolean>()
+        burnQuestion.value = answer
+        return answer.await().also {
+            burnChoice = it
+            burnQuestion.value = null
+        }
     }
 
     private val listener = object : Player.Listener {
@@ -208,8 +292,8 @@ class PlayerActivity : ComponentActivity() {
             if (!tracksApplied) {
                 tracksApplied = true
                 PlexTracks.apply(player, part, audio.value, subtitle.value)
-            } else if (!triedAudioOnly && PlexTracks.audioUnplayable(tracks)) {
-                playAudioConverted()
+            } else if (!triedAudioOnly && !converted && PlexTracks.audioUnplayable(tracks)) {
+                playAudioConverted(positionMs())
             }
         }
 
@@ -222,7 +306,7 @@ class PlayerActivity : ComponentActivity() {
         }
 
         override fun onPlayerError(e: PlaybackException) {
-            if (!triedAudioOnly && isAudioError(e)) playAudioConverted()
+            if (!triedAudioOnly && !converted && isAudioError(e)) playAudioConverted(positionMs())
             else error.value = "Playback failed.\n${e.errorCodeName}: ${e.message}"
         }
     }
@@ -234,20 +318,31 @@ class PlayerActivity : ComponentActivity() {
             player.getRendererType(ex.rendererIndex) == C.TRACK_TYPE_AUDIO
     }
 
-    /** Last resort: Plex copies the video and converts only the audio. Refused if the video would be converted. */
-    private fun playAudioConverted() {
+    /**
+     * Plex copies the video and converts only the audio, starting at [offset]. Subtitles can't come along
+     * in that stream, so if one is selected the viewer chooses: none, or burned in (Plex converts the video).
+     */
+    private fun playAudioConverted(offset: Long) {
         triedAudioOnly = true
         val item = current.value ?: return
         val part = item.part ?: return
-        val offset = if (player.currentPosition > 0) positionMs() else if (fromStart) 0L else item.viewOffset
         lifecycleScope.launch {
-            val url = runCatching { plex.audioOnlyStream(item.ratingKey, offset) }.getOrNull()
+            player.pause()
+            val burn = subtitle.value != null && askBurn()
+            if (!burn) subtitle.value = null
+            val url = runCatching { plex.audioOnlyStream(item.ratingKey, offset, burn) }.getOrNull()
             if (url == null) {
                 player.stop()
                 error.value = "This file's audio can't be played on this TV, and Plex can't convert just the audio."
                 return@launch
             }
             timeBase = offset
+            converted = true
+            burning = burn
+            delivery.value = if (burn) Delivery.BURNING else Delivery.AUDIO_CONVERTED
+            audioInput.value = null
+            audioOutput.value = null
+            tracksApplied = false
             player.setMediaItem(mediaItem(item, part, url, hls = true))
             player.prepare()
             player.play()

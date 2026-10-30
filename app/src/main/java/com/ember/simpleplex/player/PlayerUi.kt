@@ -42,7 +42,14 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.Image
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.layout.ContentScale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
@@ -85,8 +92,13 @@ fun PlayerScreen(
     subtitle: Stream?,
     error: String?,
     position: () -> Long,
+    seekTo: (Long) -> Unit,
+    previews: PreviewThumbs?,
+    info: PlaybackInfo,
     onAudio: (Stream) -> Unit,
     onSubtitle: (Stream?) -> Unit,
+    askBurn: Boolean,
+    onBurnAnswer: (Boolean) -> Unit,
 ) {
     var visible by remember { mutableStateOf(true) }
     var lastInput by remember { mutableLongStateOf(0L) }
@@ -114,6 +126,42 @@ fun PlayerScreen(
     }
     BackHandler(enabled = visible && error == null) { visible = false }
 
+    // Scrubbing: left/right move a preview playhead (video paused); OK jumps there, Back cancels.
+    var scrubAt by remember { mutableStateOf<Long?>(null) }
+    var resumeAfterScrub by remember { mutableStateOf(false) }
+    var lastStepAt by remember { mutableLongStateOf(0L) }
+    val duration = item?.duration?.takeIf { it > 0 } ?: player.duration.coerceAtLeast(1)
+
+    fun scrub(e: android.view.KeyEvent, direction: Int) {
+        val from = scrubAt ?: run {
+            resumeAfterScrub = player.isPlaying
+            player.pause()
+            position()
+        }
+        val step = if (e.repeatCount == 0) {
+            10_000L
+        } else {
+            // Holding the button speeds up smoothly: 30 s of video per second, +60 s/s for every second
+            // held, capped so a whole film takes about 20 seconds.
+            val held = (e.eventTime - e.downTime) / 1000f
+            val speed = minOf(30_000f + 60_000f * held, maxOf(duration / 20f, 30_000f))
+            (speed * (e.eventTime - lastStepAt).coerceIn(0, 200) / 1000f).toLong()
+        }
+        lastStepAt = e.eventTime
+        scrubAt = (from + direction * step).coerceIn(0, duration)
+    }
+    fun commitScrub() {
+        scrubAt?.let(seekTo)
+        scrubAt = null
+        player.play()
+    }
+    fun cancelScrub() {
+        if (scrubAt == null) return
+        scrubAt = null
+        if (resumeAfterScrub) player.play()
+    }
+    BackHandler(enabled = scrubAt != null) { cancelScrub() }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -125,14 +173,14 @@ fun PlayerScreen(
                 when (e.key) {
                     Key.Back -> false
                     Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { player.togglePlay(); visible = true; true }
-                    Key.MediaFastForward -> { player.seekForward(); visible = true; true }
-                    Key.MediaRewind -> { player.seekBack(); visible = true; true }
+                    Key.MediaFastForward -> { scrub(e.nativeKeyEvent, 1); visible = true; true }
+                    Key.MediaRewind -> { scrub(e.nativeKeyEvent, -1); visible = true; true }
                     else -> if (visible) false else {
-                        // Hidden controls: OK pauses, left/right skip, anything else just shows the controls.
+                        // Hidden controls: OK pauses, left/right start scrubbing, anything else shows the controls.
                         when (e.key) {
                             Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> player.togglePlay()
-                            Key.DirectionLeft -> player.seekBack()
-                            Key.DirectionRight -> player.seekForward()
+                            Key.DirectionLeft -> scrub(e.nativeKeyEvent, -1)
+                            Key.DirectionRight -> scrub(e.nativeKeyEvent, 1)
                             else -> {}
                         }
                         visible = true
@@ -174,13 +222,28 @@ fun PlayerScreen(
                 Text("Press Back to return", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
             }
         } else if (visible && item != null) {
+            InfoBox(info, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
             Controls(
-                player, item, audio, subtitle, isPlaying, position, scrub,
+                item, duration, audio, subtitle, isPlaying, position, scrubAt, previews, scrub,
                 modifier = Modifier.align(Alignment.BottomCenter),
                 onPick = { picker = it },
+                onKey = { e ->
+                    when (e.key) {
+                        Key.DirectionLeft -> { scrub(e.nativeKeyEvent, -1); true }
+                        Key.DirectionRight -> { scrub(e.nativeKeyEvent, 1); true }
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                            if (scrubAt != null) commitScrub() else player.togglePlay()
+                            true
+                        }
+                        else -> false
+                    }
+                },
+                onLeaveBar = ::cancelScrub,
             )
         }
     }
+
+    if (askBurn) BurnQuestion(onBurnAnswer)
 
     when (picker) {
         2 -> TrackPicker("Audio", audioOptions, audio, allowOff = false, onDismiss = { picker = null }) { onAudio(it!!) }
@@ -190,15 +253,19 @@ fun PlayerScreen(
 
 @Composable
 private fun Controls(
-    player: Player,
     item: Item,
+    duration: Long,
     audio: Stream?,
     subtitle: Stream?,
     isPlaying: Boolean,
     position: () -> Long,
-    scrub: FocusRequester,
+    scrubAt: Long?,
+    previews: PreviewThumbs?,
+    bar: FocusRequester,
     modifier: Modifier,
     onPick: (Int) -> Unit,
+    onKey: (KeyEvent) -> Boolean,
+    onLeaveBar: () -> Unit,
 ) {
     var pos by remember { mutableLongStateOf(position()) }
     LaunchedEffect(item) {
@@ -207,9 +274,9 @@ private fun Controls(
             delay(250)
         }
     }
-    val duration = item.duration.takeIf { it > 0 } ?: player.duration.coerceAtLeast(1)
-    val fraction = (pos.toFloat() / duration).coerceIn(0f, 1f)
-    var scrubFocused by remember { mutableStateOf(false) }
+    val shown = scrubAt ?: pos
+    val fraction = (shown.toFloat() / duration).coerceIn(0f, 1f)
+    var barFocused by remember { mutableStateOf(false) }
 
     Column(
         modifier
@@ -235,24 +302,19 @@ private fun Controls(
             Modifier
                 .fillMaxWidth()
                 .height(20.dp)
-                .focusRequester(scrub)
-                .onFocusChanged { scrubFocused = it.isFocused }
-                .onKeyEvent { e ->
-                    if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
-                    when (e.key) {
-                        Key.DirectionLeft -> { player.seekBack(); true }
-                        Key.DirectionRight -> { player.seekForward(); true }
-                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> { player.togglePlay(); true }
-                        else -> false
-                    }
+                .focusRequester(bar)
+                .onFocusChanged {
+                    barFocused = it.isFocused
+                    if (!it.isFocused) onLeaveBar()
                 }
+                .onKeyEvent { e -> e.type == KeyEventType.KeyDown && onKey(e) }
                 .focusable(),
             contentAlignment = Alignment.CenterStart,
         ) {
             Box(Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)).background(Palette.Divider)) {
                 Box(Modifier.fillMaxHeight().fillMaxWidth(fraction).background(Palette.Ink))
             }
-            val knob = if (scrubFocused) 16.dp else 12.dp
+            val knob = if (barFocused) 16.dp else 12.dp
             Box(
                 Modifier
                     .offset(x = maxWidth * fraction - knob / 2)
@@ -260,13 +322,109 @@ private fun Controls(
                     .border(3.dp, Color.White, CircleShape)
                     .background(Palette.Ink, CircleShape)
             )
+            if (scrubAt != null) {
+                // Floats above the bar, over the title row and the video.
+                val thumbWidth = 192.dp
+                val thumbHeight = if (previews != null) 108.dp else 0.dp
+                Column(
+                    Modifier
+                        .offset(
+                            x = (maxWidth * fraction - thumbWidth / 2).coerceIn(0.dp, maxWidth - thumbWidth),
+                            y = -(thumbHeight + 40.dp),
+                        )
+                        .width(thumbWidth),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (previews != null) PreviewImage(previews, scrubAt, Modifier.size(thumbWidth, thumbHeight))
+                    Text(
+                        formatDuration(scrubAt),
+                        modifier = Modifier.background(Palette.Ink, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                    )
+                }
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(formatDuration(pos), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Palette.Secondary)
+            Text(formatDuration(shown), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Palette.Secondary)
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 Icon(if (isPlaying) Icons.Pause else Icons.Play, contentDescription = if (isPlaying) "Playing" else "Paused", tint = Palette.Ink, modifier = Modifier.size(14.dp))
             }
-            Text("−" + formatDuration((duration - pos).coerceAtLeast(0)), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Palette.Secondary)
+            Text("−" + formatDuration((duration - shown).coerceAtLeast(0)), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Palette.Secondary)
+        }
+    }
+}
+
+/** Small technical readout in the top-left corner, shown only together with the controls. */
+@Composable
+private fun InfoBox(info: PlaybackInfo, modifier: Modifier) {
+    Column(
+        modifier
+            .background(Color(0xCC3A3A3E), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        InfoLine("Video", info.video)
+        InfoLine("Audio", info.audio)
+        InfoLine("Subs", info.subtitle)
+        Row(Modifier.padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            info.markers.forEach {
+                Text(
+                    it,
+                    modifier = Modifier.border(1.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                    fontSize = 8.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoLine(label: String, value: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, modifier = Modifier.width(34.dp), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.6f))
+        Text(value, fontSize = 9.sp, color = Color.White)
+    }
+}
+
+@Composable
+private fun PreviewImage(previews: PreviewThumbs, at: Long, modifier: Modifier) {
+    val frame = previews.frameAt(at)
+    // Keeps showing the previous frame until the next one is decoded, so scrubbing doesn't flicker.
+    val image by produceState<ImageBitmap?>(null, frame) {
+        value = withContext(Dispatchers.IO) { previews.image(frame) } ?: value
+    }
+    Box(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black)
+            .border(2.dp, Color.White, RoundedCornerShape(8.dp)),
+    ) {
+        image?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+    }
+}
+
+/** TrueHD this TV can't play: Plex converts the audio, and subtitles only survive that burned in. */
+@Composable
+private fun BurnQuestion(onAnswer: (Boolean) -> Unit) {
+    val focus = remember { FocusRequester() }
+    Dialog(onDismissRequest = { onAnswer(false) }) {
+        Column(
+            Modifier.width(420.dp).background(Palette.Tile, RoundedCornerShape(14.dp)).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("Subtitles for this file", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp))
+            Text(
+                "This TV can't play the file's TrueHD audio, so Plex converts it. Subtitles can only be " +
+                    "kept by burning them into the picture, which means Plex converts the video too.",
+                fontSize = 12.sp, color = Palette.Secondary, modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            PillButton("No subtitles", { onAnswer(false) }, Modifier.fillMaxWidth().focusRequester(focus))
+            PillButton("Burn in subtitles", { onAnswer(true) }, Modifier.fillMaxWidth())
+        }
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            runCatching { focus.requestFocus() }
         }
     }
 }

@@ -34,6 +34,10 @@ android {
     lint {
         checkReleaseBuilds = false
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 val media3 = "1.9.4"
@@ -55,4 +59,6 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
+
+    testImplementation("junit:junit:4.13.2")
 }
