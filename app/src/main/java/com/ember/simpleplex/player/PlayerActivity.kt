@@ -1,6 +1,8 @@
 package com.ember.simpleplex.player
 
+import android.content.Context
 import android.net.Uri
+import android.os.Handler
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -21,6 +23,9 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -34,6 +39,7 @@ import com.ember.simpleplex.ui.AppTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -87,10 +93,9 @@ class PlayerActivity : ComponentActivity() {
         fromStart = intent.getBooleanExtra(EXTRA_FROM_START, false)
         shuffle = intent.getBooleanExtra(EXTRA_SHUFFLE, false)
 
-        // Platform renderers first (passthrough or the TV's decoders), FFmpeg after them for anything left.
-        val renderers = DefaultRenderersFactory(this)
+        // Platform renderers first (passthrough or the TV's decoders), FFmpeg after them for audio only.
+        val renderers = HardwareVideoRenderersFactory(this)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
-            .setEnableDecoderFallback(true)
         player = ExoPlayer.Builder(this, renderers)
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(30_000)
@@ -157,21 +162,50 @@ class PlayerActivity : ComponentActivity() {
         load()
     }
 
+    // Playback never continues in the background. The player must also be released while its video
+    // surface still exists: released after it, this TV's MediaTek decoder hangs for about a minute, keeps
+    // playing audio and keeps the hardware decoder busy, so the next video fails to start.
+
+    /** Home button or switching apps. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        releasePlayer()
+        finish()
+    }
+
+    /** Back, or the end of the queue: runs before the window and its surface are torn down. */
+    override fun onPause() {
+        super.onPause()
+        if (isFinishing) releasePlayer()
+    }
+
+    /** Anything else that hides the player. */
     override fun onStop() {
         super.onStop()
-        report("stopped")
-        player.pause()
+        releasePlayer()
         finish()
     }
 
     override fun onDestroy() {
-        player.release()
+        releasePlayer()
         super.onDestroy()
+    }
+
+    private var released = false
+
+    private fun releasePlayer() {
+        if (released) return
+        report("stopped")
+        released = true
+        lifecycleScope.coroutineContext.cancelChildren()
+        player.stop()
+        player.release()
     }
 
     private fun positionMs() = timeBase + player.currentPosition.coerceAtLeast(0)
 
     private fun report(state: String) {
+        if (released) return
         val item = current.value ?: return
         val time = positionMs()
         plex.fire { timeline(item.ratingKey, state, time, item.duration) }
@@ -370,6 +404,26 @@ class PlayerActivity : ComponentActivity() {
             queue += rest.map { it.ratingKey }
             load()
         }
+    }
+
+    /**
+     * Video only ever goes through the TV's hardware decoder: it's what deinterlaces and handles HDR,
+     * and a software fallback (FFmpeg or Android's own) can't keep up with 4K anyway.
+     */
+    private class HardwareVideoRenderersFactory(context: Context) : DefaultRenderersFactory(context) {
+        override fun buildVideoRenderers(
+            context: Context,
+            extensionRendererMode: Int,
+            mediaCodecSelector: MediaCodecSelector,
+            enableDecoderFallback: Boolean,
+            eventHandler: Handler,
+            eventListener: VideoRendererEventListener,
+            allowedVideoJoiningTimeMs: Long,
+            out: ArrayList<Renderer>,
+        ) = super.buildVideoRenderers(
+            context, EXTENSION_RENDERER_MODE_OFF, mediaCodecSelector, false,
+            eventHandler, eventListener, allowedVideoJoiningTimeMs, out,
+        )
     }
 
     companion object {

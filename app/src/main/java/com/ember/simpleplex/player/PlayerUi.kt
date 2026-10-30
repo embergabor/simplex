@@ -130,18 +130,15 @@ fun PlayerScreen(
     }
     BackHandler(enabled = visible && error == null) { visible = false }
 
-    // Scrubbing: left/right move a preview playhead (video paused); OK jumps there, Back cancels.
+    // Scrubbing: left/right move a preview playhead while the video keeps playing; OK jumps there,
+    // Back cancels. Controls hiding (5 s without a key) cancels it too.
     var scrubAt by remember { mutableStateOf<Long?>(null) }
-    var resumeAfterScrub by remember { mutableStateOf(false) }
+    LaunchedEffect(visible) { if (!visible) scrubAt = null }
     var lastStepAt by remember { mutableLongStateOf(0L) }
     val duration = item?.duration?.takeIf { it > 0 } ?: player.duration.coerceAtLeast(1)
 
     fun scrub(e: android.view.KeyEvent, direction: Int) {
-        val from = scrubAt ?: run {
-            resumeAfterScrub = player.isPlaying
-            player.pause()
-            position()
-        }
+        val from = scrubAt ?: position()
         val step = if (e.repeatCount == 0) {
             10_000L
         } else {
@@ -157,12 +154,9 @@ fun PlayerScreen(
     fun commitScrub() {
         scrubAt?.let(seekTo)
         scrubAt = null
-        player.play()
     }
     fun cancelScrub() {
-        if (scrubAt == null) return
         scrubAt = null
-        if (resumeAfterScrub) player.play()
     }
     BackHandler(enabled = scrubAt != null) { cancelScrub() }
 
