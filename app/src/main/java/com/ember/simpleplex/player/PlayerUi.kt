@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -131,7 +130,8 @@ fun PlayerScreen(
             visible = false
         }
     }
-    LaunchedEffect(visible, item) {
+    // Keyed on whether there's an item, not which: skipping episodes keeps focus on the skip button.
+    LaunchedEffect(visible, item != null) {
         withFrameNanos { }
         runCatching { if (visible && item != null) scrub.requestFocus() else root.requestFocus() }
     }
@@ -238,7 +238,7 @@ fun PlayerScreen(
             InfoBox(info, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
             Controls(
                 item, duration, audio, subtitle, isPlaying, position, scrubAt, previews, scrub,
-                onPrevious, onNext,
+                onPrevious, onNext, onTogglePlay = { player.togglePlay() },
                 modifier = Modifier.align(Alignment.BottomCenter),
                 onPick = { picker = it },
                 onKey = { e ->
@@ -280,6 +280,7 @@ private fun Controls(
     bar: FocusRequester,
     onPrevious: (() -> Unit)?,
     onNext: (() -> Unit)?,
+    onTogglePlay: () -> Unit,
     modifier: Modifier,
     onPick: (Int) -> Unit,
     onKey: (KeyEvent) -> Boolean,
@@ -312,11 +313,6 @@ private fun Controls(
                 Text(item.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, maxLines = 1)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (item.isEpisode) {
-                    IconPillButton(Icons.Previous, "Previous episode", onPrevious)
-                    IconPillButton(Icons.Next, "Next episode", onNext)
-                    Spacer(Modifier.width(8.dp))
-                }
                 PillButton("Subtitles: ${subtitle?.shortName() ?: "Off"}", { onPick(3) }, icon = Icons.Subtitles)
                 PillButton("Audio: ${audio?.shortName() ?: "—"}", { onPick(2) }, icon = Icons.Audio)
             }
@@ -369,8 +365,11 @@ private fun Controls(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(formatDuration(shown), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Palette.Secondary)
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Icon(if (isPlaying) Icons.Pause else Icons.Play, contentDescription = if (isPlaying) "Playing" else "Paused", tint = Palette.Ink, modifier = Modifier.size(14.dp))
+            // Previous/next episode around play/pause; movies and home videos get play/pause alone.
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally)) {
+                if (item.isEpisode) IconPillButton(Icons.Previous, "Previous episode", onPrevious)
+                IconPillButton(if (isPlaying) Icons.Pause else Icons.Play, if (isPlaying) "Pause" else "Play", onTogglePlay)
+                if (item.isEpisode) IconPillButton(Icons.Next, "Next episode", onNext)
             }
             Text("−" + formatDuration((duration - shown).coerceAtLeast(0)), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Palette.Secondary)
         }
