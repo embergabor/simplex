@@ -2,6 +2,7 @@ package com.ember.simpleplex.player
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.nio.ByteBuffer
@@ -39,6 +40,17 @@ class PreviewThumbsTest {
     @Test fun zeroSeparationMeansOneSecond() {
         val thumbs = PreviewThumbs.parse(bif(listOf(5, 5), separation = 0))!!
         assertEquals(1, thumbs.frameAt(1000))
+    }
+
+    @Test fun hdrToneMapCurve() {
+        val lut = PreviewThumbs.pqToSdr
+        assertEquals(0, lut[0])
+        assertEquals(255, lut[255])
+        for (i in 1..255) assertTrue("not rising at $i", lut[i] >= lut[i - 1])
+        // PQ code for ~100 nits (about 130) becomes a mid-bright grey instead of near-black-grey.
+        assertTrue("100 nits -> ${lut[130]}", lut[130] in 140..175)
+        // ~1000 nits (code ~192) and above reach white.
+        assertTrue("1000 nits -> ${lut[192]}", lut[192] >= 250)
     }
 
     @Test fun rejectsOtherFiles() {
