@@ -394,10 +394,13 @@ class PlayerActivity : ComponentActivity() {
             player.pause()
             val burn = subtitle.value != null && askBurn()
             if (!burn) subtitle.value = null
-            val url = runCatching { plex.audioOnlyStream(item.ratingKey, offset, burn) }.getOrNull()
-            if (url == null) {
+            val url = try {
+                plex.audioOnlyStream(item.ratingKey, offset, burn)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
                 player.stop()
-                error.value = "This file's audio can't be played on this TV, and Plex can't convert just the audio."
+                error.value = "This file's audio can't be played on this TV, and Plex can't convert just the audio.\n${e.message}"
                 return@launch
             }
             timeBase = offset

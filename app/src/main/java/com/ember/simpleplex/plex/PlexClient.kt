@@ -2,6 +2,7 @@ package com.ember.simpleplex.plex
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -213,14 +214,23 @@ class PlexClient private constructor(context: Context) {
     }
 
     /**
-     * Asks Plex for an HLS stream that copies the video untouched and converts only the audio.
-     * Returns null if Plex would have to convert the video too. The one exception is [burnSubtitles],
-     * which the viewer asked for: burning the selected subtitle into the picture means converting the video.
+     * Asks Plex for an HLS stream that copies the video untouched and converts only the audio, to 5.1
+     * E-AC3 or AC3 for passthrough. Throws with Plex's reason if Plex would have to convert the video
+     * too. The one exception is [burnSubtitles], which the viewer asked for: burning the selected
+     * subtitle into the picture means converting the video.
      */
-    suspend fun audioOnlyStream(ratingKey: String, offsetMs: Long, burnSubtitles: Boolean): String? {
+    suspend fun audioOnlyStream(ratingKey: String, offsetMs: Long, burnSubtitles: Boolean): String {
         val session = UUID.randomUUID().toString()
-        val profile = "add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts" +
-            "&videoCodec=h264,hevc,mpeg2video,vc1,vp9,av1&audioCodec=eac3,ac3)"
+        // Plex starts from its built-in profile for the platform, whose HLS target only allows H.264 video
+        // and stereo AAC audio. These extend that target instead of adding a second one (which Plex ignores).
+        val hls = "type=videoProfile&context=streaming&protocol=hls"
+        val profile = listOf(
+            "append-transcode-target-codec($hls&videoCodec=hevc,mpeg2video,vc1,vp9,av1)",
+            "add-transcode-target-audio-codec($hls&audioCodec=eac3)",
+            "add-transcode-target-audio-codec($hls&audioCodec=ac3)",
+            "add-limitation(scope=videoAudioCodec&scopeName=eac3&type=upperBound&name=audio.channels&value=6)",
+            "add-limitation(scope=videoAudioCodec&scopeName=ac3&type=upperBound&name=audio.channels&value=6)",
+        ).joinToString("+")
         val query = listOf(
             "hasMDE" to "1",
             "path" to "/library/metadata/$ratingKey",
@@ -247,8 +257,18 @@ class PlexClient private constructor(context: Context) {
         ).joinToString("&") { (k, v) -> "$k=${enc(v)}" }
 
         val decision = get("/video/:/transcode/universal/decision?$query")
-        val video = decision.items().firstOrNull()?.part?.streams?.firstOrNull { it.streamType == 1 }
-        if (video == null || (video.decision != "copy" && !burnSubtitles)) return null
+        val streams = decision.items().firstOrNull()?.part?.streams.orEmpty()
+        val reason = listOfNotNull(
+            decision.str("generalDecisionText"),
+            decision.str("transcodeDecisionText"),
+        ).distinct().joinToString(" ")
+        Log.i(TAG, "decision burn=$burnSubtitles: $reason | " +
+            streams.joinToString { "${it.streamType}:${it.codec}/${it.channels ?: "-"}=${it.decision}" })
+        val video = streams.firstOrNull { it.streamType == 1 }
+            ?: throw IOException("Plex didn't offer a stream. $reason")
+        if (video.decision != "copy" && !burnSubtitles) {
+            throw IOException("Plex would have to convert the ${video.codec} video too. $reason")
+        }
         return "$serverUri/video/:/transcode/universal/start.m3u8?$query"
     }
 
@@ -256,6 +276,7 @@ class PlexClient private constructor(context: Context) {
 
     companion object {
         const val PRODUCT = "Simplex"
+        private const val TAG = "Simplex"
         private const val PLEX_TV = "https://plex.tv/api/v2"
 
         @Volatile private var instance: PlexClient? = null
