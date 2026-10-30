@@ -30,6 +30,8 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -40,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -144,13 +147,15 @@ private val cardShape = RoundedCornerShape(8.dp)
 private const val FOCUSED_SCALE = 1.08f
 
 /**
- * A focused poster or thumbnail grows together with its title, so nothing covers the text underneath,
- * and gets a ring drawn inside its edge (see [InsetRing]).
+ * A focused poster or thumbnail grows (the card's own scale) and the title underneath slides down by
+ * as much as the card's bottom edge moves, so it stays readable. Only the title is moved here: a
+ * transform around the card itself also changes the box the lists scroll into view, and the rows then
+ * chase every frame of the animation.
  */
 @Composable
-private fun Modifier.focusLift(focused: Boolean): Modifier {
+private fun Modifier.followCard(focused: Boolean, cardHeight: Int): Modifier {
     val scale by animateFloatAsState(if (focused) FOCUSED_SCALE else 1f, label = "focus")
-    return graphicsLayer { scaleX = scale; scaleY = scale }.zIndex(if (focused) 1f else 0f)
+    return graphicsLayer { translationY = cardHeight * (scale - 1f) / 2f }
 }
 
 /** Dark outer line for the grey background, white inner line for dark artwork. */
@@ -203,15 +208,15 @@ private fun ArtCard(
     onLongClick: (() -> Unit)?,
     interaction: MutableInteractionSource,
     focused: Boolean,
+    onHeight: (Int) -> Unit,
     modifier: Modifier,
 ) {
     Card(
         onClick = onClick,
         onLongClick = onLongClick,
-        modifier = modifier.fillMaxWidth().aspectRatio(aspect),
+        modifier = modifier.fillMaxWidth().aspectRatio(aspect).onSizeChanged { onHeight(it.height) },
         shape = CardDefaults.shape(cardShape),
-        // The whole card and its title grow instead (focusLift).
-        scale = CardDefaults.scale(scale = 1f, focusedScale = 1f, pressedScale = 0.97f),
+        scale = CardDefaults.scale(focusedScale = FOCUSED_SCALE),
         border = CardDefaults.border(focusedBorder = Border.None),
         colors = CardDefaults.colors(containerColor = Palette.Placeholder),
         interactionSource = interaction,
@@ -247,9 +252,10 @@ fun PosterCard(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    Column(Modifier.focusLift(focused), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ArtCard(imageUrl, title, 2f / 3f, progress, watched, null, onClick, onLongClick, interaction, focused, modifier)
-        Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp))
+    var cardHeight by remember { mutableIntStateOf(0) }
+    Column(Modifier.zIndex(if (focused) 1f else 0f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ArtCard(imageUrl, title, 2f / 3f, progress, watched, null, onClick, onLongClick, interaction, focused, { cardHeight = it }, modifier)
+        Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.followCard(focused, cardHeight).padding(horizontal = 2.dp))
     }
 }
 
@@ -270,12 +276,13 @@ fun WideCard(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    var cardHeight by remember { mutableIntStateOf(0) }
     Column(
-        modifier = (if (width != null) Modifier.width(width) else Modifier).focusLift(focused),
+        modifier = (if (width != null) Modifier.width(width) else Modifier).zIndex(if (focused) 1f else 0f),
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        ArtCard(imageUrl, title, 16f / 9f, progress, watched, badge, onClick, onLongClick, interaction, focused, modifier)
-        Column(Modifier.padding(horizontal = 2.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        ArtCard(imageUrl, title, 16f / 9f, progress, watched, badge, onClick, onLongClick, interaction, focused, { cardHeight = it }, modifier)
+        Column(Modifier.followCard(focused, cardHeight).padding(horizontal = 2.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             val small: @Composable (String) -> Unit = { Text(it, fontSize = 9.5.sp, color = Palette.Secondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             val big: @Composable (String) -> Unit = { Text(it, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             if (subtitleFirst) { subtitle?.let { small(it) }; big(title) } else { big(title); subtitle?.let { small(it) } }
