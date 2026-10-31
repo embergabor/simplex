@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.lazy.rememberLazyListState
 import kotlinx.coroutines.launch
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Surface
@@ -360,6 +362,7 @@ private fun LetterColumn(letters: List<Pair<Char, Int>>, modifier: Modifier, onJ
 
 // --- One show: Play / Shuffle, its favourite episodes, then one row per season ---
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
     val refresh = LocalRefresh.current
@@ -453,7 +456,14 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
                         Box(Modifier.padding(horizontal = 48.dp).padding(bottom = 16.dp).fillMaxWidth().height(1.dp).background(Palette.Divider))
                     }
                     SectionTitle(if (number == 0) "Specials" else "Season $number", Modifier.padding(horizontal = 48.dp))
+                    // Moving up or down into a season lands on its first episode, not the one below the last.
+                    val firstEpisode = remember { FocusRequester() }
+                    val rowState = rememberLazyListState()
                     LazyRow(
+                        state = rowState,
+                        modifier = Modifier.focusProperties {
+                            enter = { if (rowState.firstVisibleItemIndex == 0) firstEpisode else FocusRequester.Default }
+                        },
                         contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
                         horizontalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
@@ -461,14 +471,16 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
                             WideCard(
                                 imageUrl = plex.image(ep.thumb, 352, 198),
                                 title = ep.title,
-                                subtitle = "Episode ${ep.index ?: ""}",
+                                subtitle = listOfNotNull("Episode ${ep.index ?: ""}", ep.airDate?.let(ItemInfo::date)).joinToString(" · "),
                                 subtitleFirst = true,
                                 progress = ep.progress,
                                 watched = ep.watched,
                                 onClick = { playFrom(episodes.indexOf(ep), false) },
                                 onLongClick = { menuFor = ep },
                                 width = 176.dp,
-                                modifier = Modifier.remembersFocus(memory, ep.ratingKey),
+                                modifier = Modifier
+                                    .then(if (ep == eps.first()) Modifier.focusRequester(firstEpisode) else Modifier)
+                                    .remembersFocus(memory, ep.ratingKey),
                             )
                         }
                     }

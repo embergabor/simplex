@@ -196,7 +196,12 @@ fun SearchScreen(plex: PlexClient, nav: Nav) {
         }
     }
 
-    var query by rememberSaveable { mutableStateOf("") }
+    val history = remember { SearchHistory(context) }
+    // The last search stays until it's cleared.
+    var query by rememberSaveable { mutableStateOf(history.last) }
+    var recent by remember { mutableStateOf(history.recent) }
+    LaunchedEffect(query) { history.last = query }
+    val saveSearch = { recent = history.add(query) }
     var menuFor by remember { mutableStateOf<Item?>(null) }
     val field = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -262,6 +267,7 @@ fun SearchScreen(plex: PlexClient, nav: Nav) {
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, showKeyboardOnFocus = false),
                         // Search on the keyboard: close it and go down to the results.
                         keyboardActions = KeyboardActions(onSearch = {
+                            saveSearch()
                             typing = false
                             keyboard?.hide()
                             focus.moveFocus(FocusDirection.Down)
@@ -284,6 +290,23 @@ fun SearchScreen(plex: PlexClient, nav: Nav) {
                             },
                     )
                 }
+                if (query.isNotEmpty()) {
+                    PillButton("Clear", {
+                        query = ""
+                        runCatching { field.requestFocus() }
+                        typing = true
+                        keyboard?.show()
+                    })
+                }
+            }
+        }
+        // Recent searches as quick picks while nothing is being searched.
+        if (!searching && recent.isNotEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }, key = "recent") {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Recent", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Palette.Secondary, modifier = Modifier.padding(end = 4.dp))
+                    recent.forEach { q -> PillButton(q, { query = q; recent = history.add(q) }) }
+                }
             }
         }
 
@@ -295,10 +318,43 @@ fun SearchScreen(plex: PlexClient, nav: Nav) {
             !searching -> {}
             found == null -> hint("Loading your libraries…")
             found.isEmpty() -> hint("Nothing found for “${query.trim()}”.")
-            else -> for (f in found) results(plex, nav, f) { menuFor = it }
+            // Opening a result counts the search as used.
+            else -> for (f in found) results(plex, nav.alsoOnOpen(saveSearch), f) { menuFor = it }
         }
     }
     menuFor?.let { ItemMenu(plex, it, nav) { menuFor = null } }
+}
+
+/** The same navigation, with [action] run first whenever something is opened or played. */
+private fun Nav.alsoOnOpen(action: () -> Unit): Nav {
+    val nav = this
+    return object : Nav {
+        override fun push(screen: Screen) { action(); nav.push(screen) }
+        override fun play(ratingKeys: List<String>, resume: Boolean, shuffle: Boolean, startAt: Int, keepQueue: Boolean) {
+            action()
+            nav.play(ratingKeys, resume, shuffle, startAt, keepQueue)
+        }
+    }
+}
+
+/** The last search and the few before it, kept on the TV. */
+private class SearchHistory(context: android.content.Context) {
+    private val prefs = context.getSharedPreferences("search", android.content.Context.MODE_PRIVATE)
+
+    var last: String
+        get() = prefs.getString("last", "") ?: ""
+        set(value) { prefs.edit().putString("last", value).apply() }
+
+    val recent: List<String> get() = prefs.getString("recent", "")!!.split('\n').filter { it.isNotBlank() }
+
+    /** Puts [query] first in the recent list (at most 6, no repeats); returns the list. */
+    fun add(query: String): List<String> {
+        val q = query.trim()
+        if (q.length < 2) return recent
+        val list = (listOf(q) + recent.filterNot { it.equals(q, ignoreCase = true) }).take(6)
+        prefs.edit().putString("recent", list.joinToString("\n")).apply()
+        return list
+    }
 }
 
 private fun LazyGridScope.hint(text: String) = item(span = { GridItemSpan(maxLineSpan) }) {

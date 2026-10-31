@@ -200,7 +200,8 @@ object ItemInfo {
 
     private fun more(n: Int) = if (n > 0) " + $n more" else ""
 
-    private fun date(iso: String) = runCatching {
+    /** "12 May 2015" from Plex's "2015-05-12". */
+    fun date(iso: String) = runCatching {
         LocalDate.parse(iso.take(10)).format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH))
     }.getOrNull()
 
