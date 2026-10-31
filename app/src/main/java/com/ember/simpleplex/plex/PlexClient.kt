@@ -268,36 +268,51 @@ class PlexClient private constructor(context: Context) {
         send("/library/parts/$partId?$params", "PUT")
     }
 
-    data class Converted(val url: String, val videoCopied: Boolean)
+    /**
+     * [mkv]: a Matroska stream, which can't be seeked (a seek starts a new conversion); otherwise HLS.
+     * [subtitleBurned]: Plex had to burn the subtitle in after all, converting the video.
+     */
+    data class Converted(val url: String, val mkv: Boolean, val videoCopied: Boolean, val subtitleBurned: Boolean)
 
     /**
-     * Asks Plex for an HLS stream with the audio converted (to 5.1 E-AC3 or AC3, for passthrough) and,
-     * if [burnSubtitles], the selected subtitle burned in. Plex decides the rest: it copies the video
-     * when it can and converts it when it must (always when burning).
+     * Asks Plex for a stream with the audio converted (to 5.1 E-AC3 or AC3, for passthrough); Plex copies
+     * the video when it can. With [keepSubtitle], the subtitle selected on the server comes along as its
+     * own track (text or image) in a Matroska stream: Plex's HLS can't carry image subtitles, and only
+     * burns text ones in. Without it, an HLS stream with no subtitles.
      */
-    suspend fun convertedStream(ratingKey: String, offsetMs: Long, burnSubtitles: Boolean): Converted {
+    suspend fun convertedStream(ratingKey: String, offsetMs: Long, keepSubtitle: Boolean): Converted {
         val session = UUID.randomUUID().toString()
-        // Plex starts from its built-in profile for the platform, whose HLS target only allows H.264 video
-        // and stereo AAC audio. These extend that target instead of adding a second one (which Plex ignores).
-        val hls = "type=videoProfile&context=streaming&protocol=hls"
-        val profile = listOf(
-            "append-transcode-target-codec($hls&videoCodec=hevc,mpeg2video,vc1,vp9,av1)",
-            "add-transcode-target-audio-codec($hls&audioCodec=eac3)",
-            "add-transcode-target-audio-codec($hls&audioCodec=ac3)",
+        val platform = if (keepSubtitle) "Generic" else "Android"
+        val limits = listOf(
             "add-limitation(scope=videoAudioCodec&scopeName=eac3&type=upperBound&name=audio.channels&value=6)",
             "add-limitation(scope=videoAudioCodec&scopeName=ac3&type=upperBound&name=audio.channels&value=6)",
-        ).joinToString("+")
+        )
+        val profile = if (keepSubtitle) {
+            // Plex's Android profile forces subtitles to be burned in; its generic one (asked for with the
+            // "Generic" platform below) keeps them when the target container can hold them.
+            val mkv = "type=videoProfile&context=streaming&protocol=http&container=mkv"
+            listOf("add-transcode-target($mkv&videoCodec=h264,hevc,mpeg2video,vc1,vp9,av1&audioCodec=eac3,ac3&subtitleCodec=pgs,vobsub,srt,ass)") + limits
+        } else {
+            // Plex starts from its built-in profile for the platform, whose HLS target only allows H.264 video
+            // and stereo AAC audio. These extend that target instead of adding a second one (which Plex ignores).
+            val hls = "type=videoProfile&context=streaming&protocol=hls"
+            listOf(
+                "append-transcode-target-codec($hls&videoCodec=hevc,mpeg2video,vc1,vp9,av1)",
+                "add-transcode-target-audio-codec($hls&audioCodec=eac3)",
+                "add-transcode-target-audio-codec($hls&audioCodec=ac3)",
+            ) + limits
+        }.joinToString("+")
         val query = listOf(
             "hasMDE" to "1",
             "path" to "/library/metadata/$ratingKey",
             "mediaIndex" to "0",
             "partIndex" to "0",
-            "protocol" to "hls",
+            "protocol" to if (keepSubtitle) "http" else "hls",
             "fastSeek" to "1",
             "directPlay" to "0",
             "directStream" to "1",
             "directStreamAudio" to "0",
-            "subtitles" to if (burnSubtitles) "burn" else "none",
+            "subtitles" to if (keepSubtitle) "embedded" else "none",
             "videoQuality" to "100",
             "maxVideoBitrate" to "200000",
             "videoResolution" to "3840x2160",
@@ -308,21 +323,31 @@ class PlexClient private constructor(context: Context) {
             "X-Plex-Client-Profile-Extra" to profile,
             "X-Plex-Client-Identifier" to clientId,
             "X-Plex-Product" to PRODUCT,
-            "X-Plex-Platform" to "Android",
+            "X-Plex-Platform" to platform,
             "X-Plex-Token" to (token ?: ""),
-        ).joinToString("&") { (k, v) -> "$k=${enc(v)}" }
+        ).let { if (keepSubtitle) it + ("container" to "mkv") else it }
+            .joinToString("&") { (k, v) -> "$k=${enc(v)}" }
 
-        val decision = get("/video/:/transcode/universal/decision?$query")
+        // Sent with the same platform header, so it can't override the query's.
+        val req = Request.Builder().url("$serverUri/video/:/transcode/universal/decision?$query")
+            .plexHeaders(token).header("X-Plex-Platform", platform).build()
+        val decision = JSONObject(call(req)).optJSONObject("MediaContainer") ?: JSONObject()
         val streams = decision.items().firstOrNull()?.part?.streams.orEmpty()
         val reason = listOfNotNull(
             decision.str("generalDecisionText"),
             decision.str("transcodeDecisionText"),
         ).distinct().joinToString(" ")
-        Log.i(TAG, "decision burn=$burnSubtitles: $reason | " +
+        Log.i(TAG, "decision keepSubtitle=$keepSubtitle: $reason | " +
             streams.joinToString { "${it.streamType}:${it.codec}/${it.channels ?: "-"}=${it.decision}" })
         val video = streams.firstOrNull { it.streamType == 1 }
             ?: throw IOException("Plex didn't offer a stream. $reason")
-        return Converted("$serverUri/video/:/transcode/universal/start.m3u8?$query", video.decision == "copy")
+        val endpoint = if (keepSubtitle) "start.mkv" else "start.m3u8"
+        return Converted(
+            url = "$serverUri/video/:/transcode/universal/$endpoint?$query",
+            mkv = keepSubtitle,
+            videoCopied = video.decision == "copy",
+            subtitleBurned = streams.any { it.streamType == 3 && it.decision == "burn" },
+        )
     }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")

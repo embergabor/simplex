@@ -512,7 +512,7 @@ private fun PreviewImage(previews: PreviewThumbs, at: Long, width: Dp) {
 }
 
 /** Audio that would only reach the receiver as stereo, in a file that also has a compatibility track. */
-data class AudioQuestion(val source: Stream, val compat: Stream, val burnsSubtitles: Boolean)
+data class AudioQuestion(val source: Stream, val compat: Stream)
 
 /** Back picks the compatibility track: it plays directly, nothing gets converted. */
 @Composable
@@ -528,12 +528,11 @@ private fun AudioQuestionDialog(q: AudioQuestion, onAnswer: (Boolean) -> Unit) {
             Text("Which audio?", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp))
             Text(
                 "This TV can only send $source to the receiver as stereo. The file also has a $compat track " +
-                    "in ${q.compat.language ?: "the same language"} that plays directly. Or Plex can convert the $source to 5.1" +
-                    if (q.burnsSubtitles) ", burning in the subtitles, which converts the video too." else ".",
+                    "in ${q.compat.language ?: "the same language"} that plays directly. Or Plex can convert the $source to 5.1.",
                 fontSize = 12.sp, color = Palette.Secondary, modifier = Modifier.padding(horizontal = 4.dp),
             )
             PillButton("$compat track", { onAnswer(true) }, Modifier.fillMaxWidth().focusRequester(focus))
-            PillButton("Plex converts the $source" + if (q.burnsSubtitles) " (subtitles burned in)" else "", { onAnswer(false) }, Modifier.fillMaxWidth())
+            PillButton("Plex converts the $source", { onAnswer(false) }, Modifier.fillMaxWidth())
         }
         LaunchedEffect(Unit) {
             withFrameNanos { }

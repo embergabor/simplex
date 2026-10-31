@@ -97,9 +97,19 @@ object PlexTracks {
         (0 until length).any { getTrackFormat(it).id?.contains(id) == true }
 
     /** Applies the choice; [subtitle] null means off (a forced track still shows). */
-    fun apply(player: Player, part: Part, audio: Stream?, subtitle: Stream?) {
+    fun apply(player: Player, part: Part, audio: Stream?, subtitle: Stream?, onlyChosen: Boolean = false) {
         val groups = player.currentTracks.groups
         val params = player.trackSelectionParameters.buildUpon()
+
+        // Plex's converted stream carries just the chosen audio and subtitle: take what's there.
+        if (onlyChosen) {
+            groups.firstOrNull { it.type == C.TRACK_TYPE_AUDIO }?.let { params.setOverrideForType(TrackSelectionOverride(it.mediaTrackGroup, 0)) }
+            val text = groups.firstOrNull { it.type == C.TRACK_TYPE_TEXT }
+            params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitle == null || text == null)
+            text?.let { params.setOverrideForType(TrackSelectionOverride(it.mediaTrackGroup, 0)) }
+            player.trackSelectionParameters = params.build()
+            return
+        }
 
         val audioGroups = groups.filter { it.type == C.TRACK_TYPE_AUDIO }
         val plexAudio = audioStreams(part).filter { !it.isExternal }.sortedBy { it.index ?: Int.MAX_VALUE }

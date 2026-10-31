@@ -46,8 +46,8 @@ import kotlinx.coroutines.launch
  * Plays a queue of Plex items. Files are played as they are (direct play); the TV's own decoder handles
  * deinterlacing, and audio goes out as a bitstream when the TV/receiver accept it, else it's decoded here
  * (FFmpeg for TrueHD/DTS). Multichannel audio that would only reach the receiver as stereo, without a
- * compatibility track, or audio that can't play at all, is converted by Plex instead, which may convert the
- * video too (always when burning in a subtitle).
+ * compatibility track, or audio that can't play at all, is converted by Plex instead, which copies the video
+ * when it can. A selected subtitle comes along as its own track (then the stream is Matroska).
  */
 @OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
@@ -74,8 +74,8 @@ class PlayerActivity : ComponentActivity() {
     private var triedConversion = false
     private var loadJob: Job? = null
 
-    /** Whether the converted stream has the selected subtitle burned in. */
-    private var burning = false
+    /** Plex's converted Matroska stream can't be seeked: a seek starts a new conversion there. */
+    private var convertedMkv = false
 
     private val current = mutableStateOf<Item?>(null)
     private val audio = mutableStateOf<Stream?>(null)
@@ -147,7 +147,7 @@ class PlayerActivity : ComponentActivity() {
                     error = error.value,
                     position = ::positionMs,
                     // A converted stream starts at timeBase, so it can't go earlier than that.
-                    seekTo = { player.seekTo((it - timeBase).coerceAtLeast(0)) },
+                    seekTo = ::seekTo,
                     previews = previews.value,
                     onAudio = ::chooseAudio,
                     onSubtitle = ::chooseSubtitle,
@@ -278,14 +278,16 @@ class PlayerActivity : ComponentActivity() {
         audioInput.value = null
         audioOutput.value = null
         tracksApplied = false
-        player.setMediaItem(mediaItem(item, part, plex.fileUrl(part.key), hls = false), startMs)
+        player.setMediaItem(mediaItem(item, part, plex.fileUrl(part.key), converted = null), startMs)
         player.prepare()
         player.play()
     }
 
-    private fun mediaItem(item: Item, part: Part, url: String, hls: Boolean): MediaItem {
+    /** [converted]: the MIME type of Plex's converted stream, or null for the file itself. */
+    private fun mediaItem(item: Item, part: Part, url: String, converted: String?): MediaItem {
         // Sidecar subtitle files; a converted stream starts mid-file, so they'd be out of sync there.
-        val sidecars = if (hls) emptyList() else PlexTracks.subtitleStreams(part).filter { it.isExternal }.mapNotNull { s ->
+        // (Plex's Matroska stream carries the selected one itself.)
+        val sidecars = if (converted != null) emptyList() else PlexTracks.subtitleStreams(part).filter { it.isExternal }.mapNotNull { s ->
             val mime = PlexTracks.subtitleMime(s.codec) ?: return@mapNotNull null
             MediaItem.SubtitleConfiguration.Builder(Uri.parse(plex.fileUrl(s.key!!)))
                 .setId(PlexTracks.externalId(s.id))
@@ -298,7 +300,7 @@ class PlayerActivity : ComponentActivity() {
             .setUri(url)
             .setMediaId(item.ratingKey)
             .setSubtitleConfigurations(sidecars)
-            .apply { if (hls) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            .apply { if (converted != null) setMimeType(converted) }
             .build()
     }
 
@@ -339,7 +341,7 @@ class PlayerActivity : ComponentActivity() {
             if (useCompat) onCompat() else onConvert()
             return
         }
-        question.value = AudioQuestion(source, compat, burnsSubtitles = subtitle.value != null)
+        question.value = AudioQuestion(source, compat)
         answer = { useCompat ->
             question.value = null
             answer = null
@@ -354,10 +356,10 @@ class PlayerActivity : ComponentActivity() {
         subtitle.value = s
         PlexTracks.apply(player, part, audio.value, s)
         lifecycleScope.launch {
-            // Plex burns in whichever subtitle is selected on the server, so save the choice first.
+            // Plex's conversion carries whichever subtitle is selected on the server, so save the choice first.
             runCatching { plex.selectStreams(part.id, null, s?.id ?: 0) }
-            // A converted stream restarts: burned in when there's a subtitle, audio only when there isn't.
-            if (converted && (s != null || burning)) playConverted(positionMs())
+            // A converted stream restarts with the new subtitle (Matroska), or without one (HLS).
+            if (converted) playConverted(positionMs())
         }
     }
 
@@ -368,7 +370,7 @@ class PlayerActivity : ComponentActivity() {
             if (tracks.isEmpty) return
             if (!tracksApplied) {
                 tracksApplied = true
-                PlexTracks.apply(player, part, audio.value, subtitle.value)
+                PlexTracks.apply(player, part, audio.value, subtitle.value, onlyChosen = converted)
             } else if (!triedConversion && !converted && PlexTracks.audioUnplayable(tracks)) {
                 playConverted(positionMs())
             }
@@ -396,8 +398,8 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * Plex converts the audio, starting at [offset]. A selected subtitle is burned in, since it can't
-     * come along in that stream otherwise; Plex decides whether the video can be copied.
+     * Plex converts the audio, starting at [offset]. A selected subtitle comes along as its own track;
+     * Plex decides whether the video can be copied.
      */
     private fun playConverted(offset: Long) {
         triedConversion = true
@@ -405,9 +407,8 @@ class PlayerActivity : ComponentActivity() {
         val part = item.part ?: return
         lifecycleScope.launch {
             player.pause()
-            val burn = subtitle.value != null
             val stream = try {
-                plex.convertedStream(item.ratingKey, offset, burn)
+                plex.convertedStream(item.ratingKey, offset, keepSubtitle = subtitle.value != null)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -415,22 +416,27 @@ class PlayerActivity : ComponentActivity() {
                 error.value = "This file's audio can't be played on this TV, and Plex couldn't convert it.\n${e.message}"
                 return@launch
             }
-            val url = stream.url
             timeBase = offset
             converted = true
-            burning = burn
+            convertedMkv = stream.mkv
             delivery.value = when {
-                burn -> Delivery.BURNING
+                stream.subtitleBurned -> Delivery.BURNING
                 stream.videoCopied -> Delivery.AUDIO_CONVERTED
                 else -> Delivery.VIDEO_CONVERTED
             }
             audioInput.value = null
             audioOutput.value = null
             tracksApplied = false
-            player.setMediaItem(mediaItem(item, part, url, hls = true))
+            player.setMediaItem(mediaItem(item, part, stream.url, converted = if (stream.mkv) MimeTypes.VIDEO_MATROSKA else MimeTypes.APPLICATION_M3U8))
             player.prepare()
             player.play()
         }
+    }
+
+    /** [positionMs] in the file. A converted stream starts at timeBase; the Matroska one restarts for a seek. */
+    private fun seekTo(positionMs: Long) {
+        if (converted && convertedMkv) playConverted(positionMs)
+        else player.seekTo((positionMs - timeBase).coerceAtLeast(0))
     }
 
     /** The end of a video: marks it watched and plays the next one, or closes the player. */
