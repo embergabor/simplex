@@ -18,8 +18,8 @@ Android TV 8.0+.
 - **Player** (Media3 ExoPlayer):
   - Direct play. Video only goes through the TV's hardware decoder, which also does the deinterlacing.
   - Audio passes through as a bitstream when the TV and receiver accept it (AC3, E-AC3, DTS, DTS-HD).
-    Multichannel audio the TV would only send as stereo (TrueHD, LPCM, FLAC, AAC) uses a same-language
-    compatibility track when the file has one, otherwise Plex converts it to 5.1.
+    Multichannel audio the TV would only send as stereo (TrueHD, LPCM, FLAC, AAC) is converted by Plex to
+    5.1. When the file also has a same-language compatibility track, Simplex asks which to use.
   - Seek by holding left or right to drag the playhead, with Plex's preview thumbnails (tone-mapped
     for HDR). The video keeps playing while you look.
   - Previous and next episode, and an info box with the video and audio formats and whether Plex is

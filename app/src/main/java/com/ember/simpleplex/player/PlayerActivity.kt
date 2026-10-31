@@ -82,6 +82,12 @@ class PlayerActivity : ComponentActivity() {
     private val subtitle = mutableStateOf<Stream?>(null)
     private val error = mutableStateOf<String?>(null)
     private val previews = mutableStateOf<PreviewThumbs?>(null)
+
+    /** Compatibility track or Plex converting, while it's being asked. */
+    private val question = mutableStateOf<AudioQuestion?>(null)
+    private var answer: ((Boolean) -> Unit)? = null
+    /** The last answer (true: compatibility track), reused for the next videos in the queue. */
+    private var lastAnswer: Boolean? = null
     private val delivery = mutableStateOf(Delivery.DIRECT)
     private val audioInput = mutableStateOf<AudioInput?>(null)
     private val audioOutput = mutableStateOf<AudioOutput?>(null)
@@ -158,6 +164,8 @@ class PlayerActivity : ComponentActivity() {
                     onNext = { skip(1) }.takeIf { canNext.value },
                     planAudio = { s -> part?.let { PlexTracks.planAudio(it, s, caps::supportsEncoding) } ?: PlexTracks.AudioPlan(s, PlexTracks.AudioChoice.PLAY) },
                     onExit = ::finish,
+                    question = question.value,
+                    onAnswer = { useCompat -> answer?.invoke(useCompat) },
                 )
             }
         }
@@ -225,6 +233,9 @@ class PlayerActivity : ComponentActivity() {
         loadJob = lifecycleScope.launch {
             val key = queue.getOrNull(index) ?: return@launch finish()
             error.value = null
+            // A question still open was about the previous video.
+            question.value = null
+            answer = null
             val item = try {
                 plex.metadata(key)
             } catch (e: CancellationException) {
@@ -247,11 +258,16 @@ class PlayerActivity : ComponentActivity() {
             triedConversion = false
             val chosen = PlexTracks.audioStreams(part).let { s -> s.firstOrNull { it.selected } ?: s.firstOrNull() }
             val plan = PlexTracks.planAudio(part, chosen, caps::supportsEncoding)
-            audio.value = plan.stream
             subtitle.value = PlexTracks.subtitleStreams(part).firstOrNull { it.selected }
 
             val start = if (fromStart) 0L else item.viewOffset
-            if (plan.choice == PlexTracks.AudioChoice.CONVERT) playConverted(start) else playDirect(item, part, start)
+            val direct = { s: Stream? -> audio.value = s; playDirect(item, part, start) }
+            val convert = { audio.value = plan.stream; playConverted(start) }
+            when (plan.choice) {
+                PlexTracks.AudioChoice.PLAY -> direct(plan.stream)
+                PlexTracks.AudioChoice.CONVERT -> convert()
+                PlexTracks.AudioChoice.ASK -> ask(plan, reuseLast = true, onCompat = { direct(plan.compat) }, onConvert = convert)
+            }
         }
     }
 
@@ -290,16 +306,45 @@ class PlayerActivity : ComponentActivity() {
         val item = current.value ?: return
         val part = item.part ?: return
         val plan = PlexTracks.planAudio(part, s, caps::supportsEncoding)
-        audio.value = plan.stream
         val position = positionMs()
+        val direct = { t: Stream? ->
+            audio.value = t
+            if (converted) playDirect(item, part, position) else PlexTracks.apply(player, part, t, subtitle.value)
+        }
+        val convert = { audio.value = plan.stream; playConverted(position) }
         lifecycleScope.launch {
             // Remember the viewer's pick on the server; Plex converts whichever track is selected there.
             runCatching { plex.selectStreams(part.id, s.id, null) }
-            when {
-                plan.choice == PlexTracks.AudioChoice.CONVERT -> playConverted(position)
-                converted -> playDirect(item, part, position)
-                else -> PlexTracks.apply(player, part, plan.stream, subtitle.value)
+            when (plan.choice) {
+                PlexTracks.AudioChoice.PLAY -> direct(plan.stream)
+                PlexTracks.AudioChoice.CONVERT -> convert()
+                PlexTracks.AudioChoice.ASK -> {
+                    // A track picked by hand is always asked about; playback waits for the answer.
+                    val wasPlaying = player.isPlaying
+                    player.pause()
+                    ask(plan, reuseLast = false, onCompat = { direct(plan.compat); if (wasPlaying) player.play() }, onConvert = convert)
+                }
             }
+        }
+    }
+
+    /**
+     * Asks whether to play the compatibility track or have Plex convert. [reuseLast]: a video starting
+     * in the queue takes the answer given for the previous one instead of asking again.
+     */
+    private fun ask(plan: PlexTracks.AudioPlan, reuseLast: Boolean, onCompat: () -> Unit, onConvert: () -> Unit) {
+        val source = plan.stream ?: return
+        val compat = plan.compat ?: return
+        lastAnswer?.takeIf { reuseLast }?.let { useCompat ->
+            if (useCompat) onCompat() else onConvert()
+            return
+        }
+        question.value = AudioQuestion(source, compat, burnsSubtitles = subtitle.value != null)
+        answer = { useCompat ->
+            question.value = null
+            answer = null
+            lastAnswer = useCompat
+            if (useCompat) onCompat() else onConvert()
         }
     }
 

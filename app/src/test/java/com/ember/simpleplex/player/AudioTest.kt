@@ -18,20 +18,19 @@ class AudioTest {
 
     private fun part(vararg s: Stream) = Part(1, "/f.mkv", s.toList(), previews = false)
 
-    @Test fun lpcmSurroundUsesSameLanguageCompatTrack() {
+    @Test fun asksBetweenConvertingAndSameLanguageCompatTrack() {
         val lpcm = audio("pcm_s24le", 6)
         val ac3 = audio("ac3", 6)
         val otherLanguageDts = audio("dca", 6, lang = "hun")
         val plan = PlexTracks.planAudio(part(lpcm, otherLanguageDts, ac3), lpcm, tv)
-        assertEquals(ac3, plan.stream)
-        assertEquals(PlexTracks.AudioChoice.PLAY, plan.choice)
+        assertEquals(PlexTracks.AudioPlan(lpcm, PlexTracks.AudioChoice.ASK, ac3), plan)
     }
 
     @Test fun prefersLosslessDtsHdOverAc3() {
         val truehd = audio("truehd", 8)
         val ac3 = audio("ac3", 6)
         val dtsHd = audio("dca", 8, profile = "ma")
-        assertEquals(dtsHd, PlexTracks.planAudio(part(truehd, ac3, dtsHd), truehd, tv).stream)
+        assertEquals(dtsHd, PlexTracks.planAudio(part(truehd, ac3, dtsHd), truehd, tv).compat)
     }
 
     @Test fun plexConvertsTrueHdWithoutCompatTrack() {

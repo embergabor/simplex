@@ -53,10 +53,10 @@ class DescribeTest {
         assertEquals(
             TrackInfo(
                 "Audio 1 of 3",
-                listOf("Lang" to "English", "Format" to "TrueHD 7.1 Atmos", "Detail" to "7.1 · 48 kHz · 4500 kbps", "Plays" to "AC3 5.1 compatibility track"),
+                listOf("Lang" to "English", "Format" to "TrueHD 7.1 Atmos", "Detail" to "7.1 · 48 kHz · 4500 kbps", "Choice" to "AC3 5.1 compatibility track, or Plex converts"),
                 listOf("Default"),
             ),
-            Describe.audioTrack(truehd, 1, 3, playsAs = ac3),
+            Describe.audioTrack(truehd, 1, 3, compat = ac3, choice = PlexTracks.AudioChoice.ASK),
         )
         val pcm = stream(2, "pcm_s24le", channels = 8).copy(title = "Commentary", samplingRate = 44100)
         assertEquals(

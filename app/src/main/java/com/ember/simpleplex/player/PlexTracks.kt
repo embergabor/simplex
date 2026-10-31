@@ -51,9 +51,13 @@ object PlexTracks {
 
         /** Multichannel audio that would only reach the receiver as stereo: Plex converts it, however it decides to. */
         CONVERT,
+
+        /** Like [CONVERT], but the file has a compatibility track too: the viewer picks one or the other. */
+        ASK,
     }
 
-    data class AudioPlan(val stream: Stream?, val choice: AudioChoice)
+    /** [compat]: with [AudioChoice.ASK], the same-language track that passes through. */
+    data class AudioPlan(val stream: Stream?, val choice: AudioChoice, val compat: Stream? = null)
 
     /**
      * Multichannel audio this TV can't pass through as a bitstream (LPCM, TrueHD, FLAC, AAC, Opus 5.1/7.1)
@@ -63,9 +67,9 @@ object PlexTracks {
         (s.channels ?: 2) > 2 && encoding(s)?.let(passthrough) != true
 
     /**
-     * Audio that would only reach the receiver as stereo: use a same-language track that passes through
-     * (the file's compatibility track). Without one, Plex converts it (TrueHD, LPCM, FLAC, AAC, ... 5.1/7.1).
-     * Everything else plays as chosen.
+     * Audio that would only reach the receiver as stereo (TrueHD, LPCM, FLAC, AAC, ... 5.1/7.1): Plex converts
+     * it, or, when the file has a same-language track that passes through (a compatibility track), the
+     * viewer is asked which. Everything else plays as chosen.
      */
     fun planAudio(part: Part, chosen: Stream?, passthrough: (Int) -> Boolean): AudioPlan {
         if (chosen == null || !reachesAsStereo(chosen, passthrough)) return AudioPlan(chosen, AudioChoice.PLAY)
@@ -76,7 +80,7 @@ object PlexTracks {
             .mapNotNull { s -> encoding(s)?.takeIf { it in compatRank && passthrough(it) }?.let { s to compatRank.getValue(it) } }
             .maxByOrNull { it.second }
             ?.first
-        return if (compat != null) AudioPlan(compat, AudioChoice.PLAY) else AudioPlan(chosen, AudioChoice.CONVERT)
+        return if (compat != null) AudioPlan(chosen, AudioChoice.ASK, compat) else AudioPlan(chosen, AudioChoice.CONVERT)
     }
 
     fun subtitleStreams(part: Part) = part.streams.filter { it.streamType == 3 }

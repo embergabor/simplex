@@ -109,6 +109,9 @@ fun PlayerScreen(
     planAudio: (Stream) -> PlexTracks.AudioPlan,
     /** Closes the player. */
     onExit: () -> Unit,
+    /** Compatibility track or Plex converting; answered with true for the compatibility track. */
+    question: AudioQuestion?,
+    onAnswer: (Boolean) -> Unit,
 ) {
     var visible by remember { mutableStateOf(true) }
     var lastInput by remember { mutableLongStateOf(0L) }
@@ -181,7 +184,7 @@ fun PlayerScreen(
         val i = (from + 1).mod(audioOptions.size)
         audioStep = i
         val plan = planAudio(audioOptions[i])
-        trackBox = Describe.audioTrack(audioOptions[i], i + 1, audioOptions.size, plan.stream, plan.choice)
+        trackBox = Describe.audioTrack(audioOptions[i], i + 1, audioOptions.size, plan.compat, plan.choice)
         trackBoxShownAt = System.nanoTime()
         audioPresses++
     }
@@ -317,6 +320,8 @@ fun PlayerScreen(
         }
     }
 
+
+    if (question != null) AudioQuestionDialog(question, onAnswer)
 
     when (picker) {
         2 -> TrackPicker("Audio", audioOptions, audio, allowOff = false, onDismiss = { picker = null }) { onAudio(it!!) }
@@ -503,6 +508,37 @@ private fun PreviewImage(previews: PreviewThumbs, at: Long, width: Dp) {
             .border(2.dp, Color.White, RoundedCornerShape(8.dp)),
     ) {
         image?.let { Image(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()) }
+    }
+}
+
+/** Audio that would only reach the receiver as stereo, in a file that also has a compatibility track. */
+data class AudioQuestion(val source: Stream, val compat: Stream, val burnsSubtitles: Boolean)
+
+/** Back picks the compatibility track: it plays directly, nothing gets converted. */
+@Composable
+private fun AudioQuestionDialog(q: AudioQuestion, onAnswer: (Boolean) -> Unit) {
+    val focus = remember { FocusRequester() }
+    val source = Describe.audioFormat(q.source)
+    val compat = Describe.audioFormat(q.compat)
+    Dialog(onDismissRequest = { onAnswer(true) }) {
+        Column(
+            Modifier.width(440.dp).background(Palette.Tile, RoundedCornerShape(14.dp)).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("Which audio?", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp))
+            Text(
+                "This TV can only send $source to the receiver as stereo. The file also has a $compat track " +
+                    "in ${q.compat.language ?: "the same language"} that plays directly. Or Plex can convert the $source to 5.1" +
+                    if (q.burnsSubtitles) ", burning in the subtitles, which converts the video too." else ".",
+                fontSize = 12.sp, color = Palette.Secondary, modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            PillButton("$compat track", { onAnswer(true) }, Modifier.fillMaxWidth().focusRequester(focus))
+            PillButton("Plex converts the $source" + if (q.burnsSubtitles) " (subtitles burned in)" else "", { onAnswer(false) }, Modifier.fillMaxWidth())
+        }
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            runCatching { focus.requestFocus() }
+        }
     }
 }
 

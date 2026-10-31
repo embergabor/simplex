@@ -24,12 +24,12 @@ data class TrackInfo(val heading: String, val lines: List<Pair<String, String>>,
 @OptIn(UnstableApi::class)
 object Describe {
 
-    /** [playsAs]: the track that actually plays when that differs (a compatibility track). */
+    /** [compat]: the compatibility track offered instead of converting [s] ([PlexTracks.AudioChoice.ASK]). */
     fun audioTrack(
         s: Stream,
         number: Int,
         count: Int,
-        playsAs: Stream? = null,
+        compat: Stream? = null,
         choice: PlexTracks.AudioChoice = PlexTracks.AudioChoice.PLAY,
     ) = TrackInfo(
         heading = "Audio $number of $count",
@@ -42,7 +42,7 @@ object Describe {
                 s.samplingRate?.let { "${kHz(it)} kHz" },
                 s.bitrate?.let { "$it kbps" },
             ).takeIf { it.isNotEmpty() }?.let { "Detail" to it.joinToString(" · ") },
-            playsAs?.takeIf { it.id != s.id }?.let { "Plays" to "${audioFormat(it)} compatibility track" },
+            compat?.let { "Choice" to "${audioFormat(it)} compatibility track, or Plex converts" },
         ),
         markers = listOfNotNull(
             "Default".takeIf { s.isDefault },
@@ -69,7 +69,7 @@ object Describe {
 
     private fun language(s: Stream) = s.language ?: s.languageCode ?: "Unknown"
 
-    private fun audioFormat(s: Stream): String {
+    fun audioFormat(s: Stream): String {
         val atmos = if (s.displayTitle.contains("Atmos", ignoreCase = true)) " Atmos" else ""
         return "${codecName(s.codec, s.profile)} ${s.channels?.let(::channels) ?: ""}".trim() + atmos
     }
