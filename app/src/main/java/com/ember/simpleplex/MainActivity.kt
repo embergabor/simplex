@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        val home = requireNotNull(plex.home)
         val stack = remember { mutableStateListOf<Screen>(Screen.Home) }
         val states = rememberSaveableStateHolder()
         val nav = remember {
@@ -94,11 +95,11 @@ class MainActivity : ComponentActivity() {
         // Keyed by depth, so going back restores the scroll position and focus of the previous screen.
         states.SaveableStateProvider(stack.size - 1) {
             when (val s = stack.last()) {
-                Screen.Home -> HomeScreen(plex, nav)
-                Screen.Search -> SearchScreen(plex, nav)
-                is Screen.Grid -> GridScreen(plex, s.library, nav)
-                is Screen.Show -> ShowScreen(plex, s.show, nav)
-                is Screen.Folder -> FolderScreen(plex, s.library, s.key, s.path, nav)
+                Screen.Home -> HomeScreen(home, nav)
+                Screen.Search -> SearchScreen(home, nav)
+                is Screen.Grid -> GridScreen(home, s.library, nav)
+                is Screen.Show -> ShowScreen(home, s.show, nav)
+                is Screen.Folder -> FolderScreen(home, s.library, s.key, s.path, nav)
             }
         }
     }

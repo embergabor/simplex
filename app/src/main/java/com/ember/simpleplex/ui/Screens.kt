@@ -54,6 +54,7 @@ import com.ember.simpleplex.plex.FolderEntry
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Library
 import com.ember.simpleplex.plex.PlexClient
+import com.ember.simpleplex.plex.PlexServer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
@@ -128,7 +129,7 @@ fun SignInScreen(plex: PlexClient, onDone: () -> Unit) {
 // --- Home ---
 
 @Composable
-fun HomeScreen(plex: PlexClient, nav: Nav) {
+fun HomeScreen(plex: PlexServer, nav: Nav) {
     val refresh = LocalRefresh.current
     val libs by load(refresh) { plex.libraries() }
     val cont by load(refresh) { plex.continueWatching() }
@@ -251,7 +252,7 @@ private fun LibraryEditor(libraries: List<Library>, hidden: Set<String>, onToggl
 // --- Movies / TV shows grid ---
 
 @Composable
-fun GridScreen(plex: PlexClient, library: Library, nav: Nav) {
+fun GridScreen(plex: PlexServer, library: Library, nav: Nav) {
     val refresh = LocalRefresh.current
     val result by load(library.key, refresh) { plex.libraryItems(library.key) }
     val memory = rememberFocusMemory()
@@ -288,7 +289,7 @@ fun GridScreen(plex: PlexClient, library: Library, nav: Nav) {
 // --- One show: Play / Shuffle, its favourite episodes, then one row per season ---
 
 @Composable
-fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
+fun ShowScreen(plex: PlexServer, show: Item, nav: Nav) {
     val refresh = LocalRefresh.current
     val result by load(show.ratingKey, refresh) {
         val episodes = Episodes.ordered(plex.episodes(show.ratingKey))
@@ -409,7 +410,7 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
 // --- Other videos, by folder ---
 
 @Composable
-fun FolderScreen(plex: PlexClient, library: Library, key: String?, path: List<String>, nav: Nav) {
+fun FolderScreen(plex: PlexServer, library: Library, key: String?, path: List<String>, nav: Nav) {
     val refresh = LocalRefresh.current
     val result by load(key, refresh) {
         // The library's favourites, A–Z: a row on the library's top level, and known in every folder for

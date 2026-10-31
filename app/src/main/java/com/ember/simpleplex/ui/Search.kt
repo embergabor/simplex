@@ -63,6 +63,7 @@ import androidx.tv.material3.Text
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Library
 import com.ember.simpleplex.plex.PlexClient
+import com.ember.simpleplex.plex.PlexServer
 import com.ember.simpleplex.ui.SearchMatch.Text as Searchable
 import android.content.Context
 import java.io.File
@@ -114,9 +115,9 @@ private class LibraryLists(val library: Library, val titles: String, val episode
  * The copy of the searched libraries kept on the TV, so Search can match straight away and refresh
  * quietly. One pair of files per library, named by the server too, so another server never mixes in.
  */
-private class SearchCache(context: Context, plex: PlexClient) {
+private class SearchCache(context: Context, plex: PlexServer) {
     private val dir = File(context.cacheDir, "search")
-    private val server = (plex.serverUri ?: "").hashCode().toUInt().toString(16)
+    private val server = plex.uri.hashCode().toUInt().toString(16)
 
     private fun file(lib: Library, kind: String) = File(dir, "$server-${lib.key}-$kind.json")
 
@@ -143,7 +144,7 @@ private class SearchCache(context: Context, plex: PlexClient) {
     }
 }
 
-private suspend fun fetch(plex: PlexClient, libraries: List<Library>): List<LibraryLists> = coroutineScope {
+private suspend fun fetch(plex: PlexServer, libraries: List<Library>): List<LibraryLists> = coroutineScope {
     libraries.map { lib ->
         async {
             val episodes = if (lib.kind == Library.Kind.SHOWS) async { plex.libraryJson(lib.key, episodes = true) } else null
@@ -165,7 +166,7 @@ private fun index(lists: List<LibraryLists>): List<LibraryIndex> = lists.map { l
  * runs on the TV against a saved copy of the libraries, which is refreshed in the background on opening.
  */
 @Composable
-fun SearchScreen(plex: PlexClient, nav: Nav) {
+fun SearchScreen(plex: PlexServer, nav: Nav) {
     val context = LocalContext.current
     val hidden = remember { LibraryPrefs(context).hidden }
     val cache = remember { SearchCache(context, plex) }
@@ -308,7 +309,7 @@ private fun LazyGridScope.hint(text: String) = item(span = { GridItemSpan(maxLin
 }
 
 /** One library's matches: its titles, then (for TV) the matching episodes. */
-private fun LazyGridScope.results(plex: PlexClient, nav: Nav, f: Found, onMenu: (Item) -> Unit) {
+private fun LazyGridScope.results(plex: PlexServer, nav: Nav, f: Found, onMenu: (Item) -> Unit) {
     val lib = f.library
     item(span = { GridItemSpan(maxLineSpan) }, key = "h" + lib.key) {
         SectionTitle(lib.title, Modifier.padding(top = 8.dp))

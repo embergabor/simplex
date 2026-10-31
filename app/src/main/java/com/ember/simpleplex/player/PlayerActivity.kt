@@ -34,6 +34,7 @@ import com.ember.simpleplex.plex.Episodes
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Part
 import com.ember.simpleplex.plex.PlexClient
+import com.ember.simpleplex.plex.PlexServer
 import com.ember.simpleplex.plex.Stream
 import com.ember.simpleplex.ui.AppTheme
 import kotlinx.coroutines.CancellationException
@@ -51,7 +52,7 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
 
-    private lateinit var plex: PlexClient
+    private lateinit var plex: PlexServer
     private lateinit var player: ExoPlayer
     private lateinit var caps: AudioCapabilities
 
@@ -94,7 +95,7 @@ class PlayerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        plex = PlexClient.get(this)
+        plex = requireNotNull(PlexClient.get(this).home)
         // What the TV accepts as a bitstream on its current output (here: eARC to the receiver).
         caps = AudioCapabilities.getCapabilities(this, AudioAttributes.DEFAULT, null)
         queue += intent.getStringArrayListExtra(EXTRA_KEYS).orEmpty()

@@ -5,7 +5,7 @@ import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.ember.simpleplex.plex.Part
-import com.ember.simpleplex.plex.PlexClient
+import com.ember.simpleplex.plex.PlexServer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -56,7 +56,7 @@ class PreviewThumbs private constructor(
         private val MAGIC = byteArrayOf(0x89.toByte(), 'B'.code.toByte(), 'I'.code.toByte(), 'F'.code.toByte(), 0x0D, 0x0A, 0x1A, 0x0A)
 
         /** Downloads (once, kept in the cache) and indexes the thumbnails, or null if Plex has none. */
-        suspend fun load(plex: PlexClient, part: Part, cacheDir: File): PreviewThumbs? = withContext(Dispatchers.IO) {
+        suspend fun load(plex: PlexServer, part: Part, cacheDir: File): PreviewThumbs? = withContext(Dispatchers.IO) {
             if (!part.previews) return@withContext null
             val video = part.streams.firstOrNull { it.streamType == 1 }
             // HDR10 and Dolby Vision with an HDR10 base. Profile 5 uses its own colors, which this can't fix.

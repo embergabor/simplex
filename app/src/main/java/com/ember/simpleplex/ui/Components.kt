@@ -72,7 +72,7 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.ember.simpleplex.plex.Episodes
 import com.ember.simpleplex.plex.Item
-import com.ember.simpleplex.plex.PlexClient
+import com.ember.simpleplex.plex.PlexServer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -427,7 +427,7 @@ fun IconPillButton(icon: ImageVector, description: String, onClick: (() -> Unit)
 
 @Composable
 /** [favorite]: whether the item is a favourite episode, or null where favourites aren't offered. */
-fun ItemMenu(plex: PlexClient, item: Item, nav: Nav, favorite: Boolean? = null, onDismiss: () -> Unit) {
+fun ItemMenu(plex: PlexServer, item: Item, nav: Nav, favorite: Boolean? = null, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     val bump = LocalRefreshBump.current
     val first = remember { FocusRequester() }
