@@ -87,6 +87,9 @@ interface Nav {
      * from the beginning; with [resume], the first one continues where it was left.
      */
     fun play(ratingKeys: List<String>, resume: Boolean = false, shuffle: Boolean = false, startAt: Int = 0, keepQueue: Boolean = false)
+
+    /** Back to the sign-in screen, after [PlexClient.signOut]. */
+    fun signOut()
 }
 
 /** Changes whenever lists should reload (returning from the player, marking watched). */

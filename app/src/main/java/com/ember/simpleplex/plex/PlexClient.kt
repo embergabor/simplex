@@ -39,6 +39,11 @@ class PlexClient private constructor(context: Context) {
 
     val isSignedIn get() = serverUri != null && token != null
 
+    /** Forgets the server and its token; the next start asks to sign in again. */
+    fun signOut() {
+        prefs.edit().remove("serverUri").remove("token").apply()
+    }
+
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)

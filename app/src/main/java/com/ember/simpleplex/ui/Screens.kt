@@ -69,6 +69,7 @@ import kotlinx.coroutines.delay
 sealed interface Screen {
     data object Home : Screen
     data object Search : Screen
+    data object Settings : Screen
     data class Grid(val library: Library) : Screen
     data class Show(val show: Item) : Screen
     data class Folder(val library: Library, val key: String?, val path: List<String>) : Screen
@@ -145,9 +146,8 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
     var menuFor by remember { mutableStateOf<Item?>(null) }
 
     val context = LocalContext.current
-    val prefs = remember { LibraryPrefs(context) }
-    var hidden by remember { mutableStateOf(prefs.hidden) }
-    var editing by remember { mutableStateOf(false) }
+    // Read again on every visit: Settings changes it.
+    val hidden = remember(refresh) { LibraryPrefs(context).hidden }
 
     val allLibraries = libs?.getOrElse { return ErrorMessage("Couldn't reach your Plex server.\n${it.message}") } ?: return
     val libraries = allLibraries.filter { it.key !in hidden }
@@ -209,53 +209,18 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                             .remembersFocus(memory, "l" + lib.key, default = continuing.isEmpty() && i == 0),
                     )
                 }
-                item(key = "edit") {
+                item(key = "settings") {
                     IconTile(
-                        icon = Icons.Edit,
-                        label = "Edit",
-                        onClick = { editing = true },
-                        modifier = Modifier.size(108.dp, 108.dp).remembersFocus(memory, "edit", default = allLibraries.isEmpty()),
+                        icon = Icons.Settings,
+                        label = "Settings",
+                        onClick = { nav.push(Screen.Settings) },
+                        modifier = Modifier.size(108.dp, 108.dp).remembersFocus(memory, "settings", default = allLibraries.isEmpty()),
                     )
                 }
             }
         }
     }
     menuFor?.let { ItemMenu(plex, it, nav, continueWatching = true) { menuFor = null } }
-    if (editing) {
-        LibraryEditor(allLibraries, hidden, onToggle = { key ->
-            hidden = if (key in hidden) hidden - key else hidden + key
-            prefs.hidden = hidden
-        }) { editing = false }
-    }
-}
-
-/** Show or hide libraries on the home screen. Hidden ones keep their place for when they come back. */
-@Composable
-private fun LibraryEditor(libraries: List<Library>, hidden: Set<String>, onToggle: (String) -> Unit, onDone: () -> Unit) {
-    val first = remember { FocusRequester() }
-    Dialog(onDismissRequest = onDone) {
-        Column(
-            Modifier.width(380.dp).background(Palette.Tile, RoundedCornerShape(14.dp)).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Libraries on Home", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp))
-            Text("Checked libraries are shown. Press Back when you're done.", fontSize = 12.sp, color = Palette.Secondary, modifier = Modifier.padding(start = 4.dp))
-            LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                itemsIndexed(libraries, key = { _, lib -> lib.key }) { i, lib ->
-                    PillButton(
-                        label = lib.title,
-                        selected = lib.key !in hidden,
-                        onClick = { onToggle(lib.key) },
-                        modifier = Modifier.fillMaxWidth().then(if (i == 0) Modifier.focusRequester(first) else Modifier),
-                    )
-                }
-            }
-        }
-        LaunchedEffect(Unit) {
-            withFrameNanos { }
-            runCatching { first.requestFocus() }
-        }
-    }
 }
 
 // --- Movies / TV shows grid ---

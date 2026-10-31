@@ -31,6 +31,7 @@ import com.ember.simpleplex.ui.Palette
 import com.ember.simpleplex.ui.Screen
 import com.ember.simpleplex.ui.SearchScreen
 import com.ember.simpleplex.ui.ShowScreen
+import com.ember.simpleplex.ui.SettingsScreen
 import com.ember.simpleplex.ui.SignInScreen
 
 class MainActivity : ComponentActivity() {
@@ -83,6 +84,12 @@ class MainActivity : ComponentActivity() {
                             .putExtra(PlayerActivity.EXTRA_KEEP_QUEUE, keepQueue)
                     )
                 }
+
+                override fun signOut() {
+                    stack.clear()
+                    stack.add(Screen.Home)
+                    signedIn = false
+                }
             }
         }
 
@@ -96,6 +103,7 @@ class MainActivity : ComponentActivity() {
             when (val s = stack.last()) {
                 Screen.Home -> HomeScreen(plex, nav)
                 Screen.Search -> SearchScreen(plex, nav)
+                Screen.Settings -> SettingsScreen(plex, nav)
                 is Screen.Grid -> GridScreen(plex, s.library, nav)
                 is Screen.Show -> ShowScreen(plex, s.show, nav)
                 is Screen.Folder -> FolderScreen(plex, s.library, s.key, s.path, nav)

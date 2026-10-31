@@ -1,0 +1,123 @@
+@file:OptIn(ExperimentalTvMaterial3Api::class)
+
+package com.ember.simpleplex.ui
+
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Text
+import coil3.SingletonImageLoader
+import com.ember.simpleplex.plex.PlexClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/** Libraries on Home, caches, the server, and which build this is. Reached from Home's Settings tile. */
+@Composable
+fun SettingsScreen(plex: PlexClient, nav: Nav) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val memory = rememberFocusMemory()
+    val prefs = remember { LibraryPrefs(context) }
+    var hidden by remember { mutableStateOf(prefs.hidden) }
+    val libraries by load(Unit) { plex.libraries() }
+    var cleared by remember { mutableStateOf(0) }
+    val cacheSize by produceState<Long?>(null, cleared) { value = withContext(Dispatchers.IO) { Caches.size(context) } }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 48.dp, vertical = 40.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        ScreenTitle("Settings")
+
+        SectionTitle("Libraries on Home", Modifier.padding(top = 10.dp))
+        val libs = libraries?.getOrNull()
+        when {
+            libraries?.isFailure == true -> Note("Couldn't reach your Plex server to list the libraries.")
+            libs == null -> Note("Loading…")
+            else -> {
+                Note("Checked libraries are shown on Home; hidden ones keep their place for when they come back.")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    libs.forEachIndexed { i, lib ->
+                        PillButton(
+                            label = lib.title,
+                            selected = lib.key !in hidden,
+                            onClick = {
+                                hidden = if (lib.key in hidden) hidden - lib.key else hidden + lib.key
+                                prefs.hidden = hidden
+                            },
+                            modifier = Modifier.remembersFocus(memory, "lib" + lib.key, default = i == 0),
+                        )
+                    }
+                }
+            }
+        }
+
+        SectionTitle("Storage", Modifier.padding(top = 10.dp))
+        Note("Preview thumbnails, the search copy of your libraries and artwork, kept on the TV to load faster.")
+        PillButton(
+            label = "Clear caches" + (cacheSize?.let { " · ${ItemInfo.size(it)}" } ?: ""),
+            onClick = {
+                scope.launch {
+                    withContext(Dispatchers.IO) { Caches.clear(context) }
+                    cleared++
+                }
+            },
+            modifier = Modifier.remembersFocus(memory, "caches"),
+        )
+
+        SectionTitle("Server", Modifier.padding(top = 10.dp))
+        Note("Connected to ${plex.serverUri ?: "—"}. Signing out lets you sign in again and pick up a different server.")
+        PillButton("Sign out", { plex.signOut(); nav.signOut() }, Modifier.remembersFocus(memory, "signout"))
+
+        SectionTitle("About", Modifier.padding(top = 10.dp))
+        Note(Build.describe(context))
+    }
+}
+
+@Composable
+private fun Note(text: String) = Text(text, fontSize = 12.sp, color = Palette.Secondary)
+
+/** What's kept in the app's cache folder: preview thumbnails, the search copy, artwork. */
+object Caches {
+    fun size(context: Context): Long = context.cacheDir.walkBottomUp().filter { it.isFile }.sumOf { it.length() }
+
+    fun clear(context: Context) {
+        // Artwork through Coil, which keeps an index of its files; everything else directly.
+        runCatching { SingletonImageLoader.get(context).diskCache?.clear() }
+        runCatching { SingletonImageLoader.get(context).memoryCache?.clear() }
+        context.cacheDir.listFiles()?.filter { !it.name.startsWith("coil") }?.forEach(File::deleteRecursively)
+    }
+}
+
+/** "Simplex 0.1 (3) · debug · installed 31 Oct 2026 19:40". */
+object Build {
+    fun describe(context: Context): String {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        val debug = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        val installed = SimpleDateFormat("d MMM yyyy HH:mm", Locale.ENGLISH).format(Date(info.lastUpdateTime))
+        return "Simplex ${info.versionName} (${info.longVersionCode}) · ${if (debug) "debug" else "release"} · installed $installed"
+    }
+}

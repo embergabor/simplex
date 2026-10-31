@@ -334,6 +334,8 @@ private fun Nav.alsoOnOpen(action: () -> Unit): Nav {
             action()
             nav.play(ratingKeys, resume, shuffle, startAt, keepQueue)
         }
+
+        override fun signOut() = nav.signOut()
     }
 }
 
