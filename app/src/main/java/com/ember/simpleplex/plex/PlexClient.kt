@@ -168,17 +168,17 @@ class PlexClient private constructor(context: Context) {
     }
 
     /**
-     * Rating keys of the episodes in a library that carry [label]. Asked the way Plex's own filters do:
-     * the label's id first, then the episodes with that id. Empty when no episode has it yet.
+     * The items of one Plex [type] in a library that carry [label]: 4 for a TV library's episodes, 1 for
+     * the videos of a movie or "other videos" library. Asked the way Plex's own filters do: the label's
+     * id first, then the items with that id. Empty when nothing has it yet.
      */
-    suspend fun labelledEpisodes(sectionKey: String, label: String): Set<String> {
-        val tag = get("/library/sections/$sectionKey/label?type=4").optJSONArray("Directory").objects()
-            .firstOrNull { it.str("title").equals(label, ignoreCase = true) } ?: return emptySet()
-        val id = (tag.str("key") ?: return emptySet()).substringAfterLast('=').substringAfterLast('/')
-        return get("/library/sections/$sectionKey/all?type=4&label=${enc(id)}").items()
+    suspend fun labelled(sectionKey: String, label: String, type: Int): List<Item> {
+        val tag = get("/library/sections/$sectionKey/label?type=$type").optJSONArray("Directory").objects()
+            .firstOrNull { it.str("title").equals(label, ignoreCase = true) } ?: return emptyList()
+        val id = (tag.str("key") ?: return emptyList()).substringAfterLast('=').substringAfterLast('/')
+        return get("/library/sections/$sectionKey/all?type=$type&label=${enc(id)}&sort=titleSort").items()
             // A list that carries labels must have this one; otherwise Plex ignored the filter.
             .filter { it.labels.isEmpty() || it.labels.any { l -> l.equals(label, ignoreCase = true) } }
-            .map { it.ratingKey }.toSet()
     }
 
     /** Adds or removes a label on one item, keeping its other labels, and checks that Plex kept the change. */

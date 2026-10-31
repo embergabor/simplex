@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -293,7 +294,7 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
         val episodes = Episodes.ordered(plex.episodes(show.ratingKey))
         val section = episodes.firstNotNullOfOrNull { it.librarySectionId } ?: show.librarySectionId
         // Favourites are extra: if Plex can't list them, the show still opens.
-        val labelled = section?.let { runCatching { plex.labelledEpisodes(it, Episodes.FAVORITE) }.getOrNull() }.orEmpty()
+        val labelled = section?.let { runCatching { plex.labelled(it, Episodes.FAVORITE, type = 4) }.getOrNull() }.orEmpty().map { it.ratingKey }.toSet()
         episodes to Episodes.favorites(episodes, labelled)
     }
     val memory = rememberFocusMemory()
@@ -410,15 +411,21 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
 @Composable
 fun FolderScreen(plex: PlexClient, library: Library, key: String?, path: List<String>, nav: Nav) {
     val refresh = LocalRefresh.current
-    val result by load(key, refresh) { plex.folder(library.key, key) }
+    val result by load(key, refresh) {
+        // The library's favourites, A–Z: a row on the library's top level, and known in every folder for
+        // the hold-OK menu. They're extra: if Plex can't list them, the folder still opens.
+        val favorites = runCatching { plex.labelled(library.key, Episodes.FAVORITE, type = 1) }.getOrNull().orEmpty()
+        plex.folder(library.key, key) to favorites
+    }
     val memory = rememberFocusMemory()
     var menuFor by remember { mutableStateOf<Item?>(null) }
-    val entries = result?.getOrElse { return ErrorMessage("Couldn't load this folder.\n${it.message}") } ?: return
+    val (entries, favorites) = result?.getOrElse { return ErrorMessage("Couldn't load this folder.\n${it.message}") } ?: return
     if (entries.isEmpty()) return Message("This folder is empty.")
 
     val folders = entries.filterIsInstance<FolderEntry.Folder>()
     val videos = entries.filterIsInstance<FolderEntry.Video>().map { it.item }
-    val firstKey = folders.firstOrNull()?.key ?: videos.first().ratingKey
+    val favoritesRow = if (key == null) favorites else emptyList()
+    val firstKey = favoritesRow.firstOrNull()?.let { "fav" + it.ratingKey } ?: folders.firstOrNull()?.key ?: videos.first().ratingKey
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
@@ -432,6 +439,39 @@ fun FolderScreen(plex: PlexClient, library: Library, key: String?, path: List<St
                 path.forEach {
                     Text("›", fontSize = 15.sp, color = Palette.Secondary)
                     Text(it, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Palette.Secondary)
+                }
+            }
+        }
+        // Played from here, favourites play on to the next favourite.
+        if (favoritesRow.isNotEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }, key = "favorites") {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    SectionTitle("Favorites")
+                    LazyRow(
+                        // Bleeds to the screen edges, so cards scroll past the grid's margins.
+                        modifier = Modifier.layout { measurable, constraints ->
+                            val bleed = 48.dp.roundToPx()
+                            val p = measurable.measure(constraints.copy(maxWidth = constraints.maxWidth + 2 * bleed))
+                            layout(constraints.maxWidth, p.height) { p.place(-bleed, 0) }
+                        },
+                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    ) {
+                        itemsIndexed(favoritesRow, key = { _, v -> v.ratingKey }) { i, v ->
+                            WideCard(
+                                imageUrl = plex.image(v.thumb, 396, 223),
+                                title = v.title,
+                                subtitle = null,
+                                badge = if (v.duration > 0) formatDuration(v.duration) else null,
+                                progress = v.progress,
+                                watched = v.watched,
+                                onClick = { nav.play(favoritesRow.map { it.ratingKey }, startAt = i, keepQueue = true) },
+                                onLongClick = { menuFor = v },
+                                width = 198.dp,
+                                modifier = Modifier.remembersFocus(memory, "fav" + v.ratingKey, default = "fav" + v.ratingKey == firstKey),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -458,5 +498,5 @@ fun FolderScreen(plex: PlexClient, library: Library, key: String?, path: List<St
             )
         }
     }
-    menuFor?.let { ItemMenu(plex, it, nav) { menuFor = null } }
+    menuFor?.let { m -> ItemMenu(plex, m, nav, favorite = favorites.any { it.ratingKey == m.ratingKey }) { menuFor = null } }
 }
