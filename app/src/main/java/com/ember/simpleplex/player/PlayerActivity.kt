@@ -57,6 +57,7 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var plex: PlexClient
     private lateinit var player: ExoPlayer
     private lateinit var caps: AudioCapabilities
+    private lateinit var showLanguages: ShowLanguages
 
     private val queue = mutableListOf<String>()
     private var index = 0
@@ -75,6 +76,8 @@ class PlayerActivity : ComponentActivity() {
     private var converted = false
     private var tracksApplied = false
     private var triedConversion = false
+    /** Direct play failed once for this video and was restarted. */
+    private var retried = false
     private var loadJob: Job? = null
 
     /** Plex's converted Matroska stream can't be seeked: a seek starts a new conversion there. */
@@ -103,6 +106,7 @@ class PlayerActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         plex = PlexClient.get(this)
+        showLanguages = ShowLanguages(this)
         // What the TV accepts as a bitstream on its current output (here: eARC to the receiver).
         caps = AudioCapabilities.getCapabilities(this, AudioAttributes.DEFAULT, null)
         queue += intent.getStringArrayListExtra(EXTRA_KEYS).orEmpty()
@@ -221,7 +225,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun releasePlayer() {
         if (released) return
-        report("stopped")
+        reportStopped()
         released = true
         lifecycleScope.coroutineContext.cancelChildren()
         player.stop()
@@ -229,6 +233,31 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun positionMs() = timeBase + player.currentPosition.coerceAtLeast(0)
+
+    /** Reports the video stopped, and watched when stopped in its end credits or past 95%. */
+    private fun reportStopped() {
+        report("stopped")
+        val item = current.value ?: return
+        if (!released && Markers.watched(item, positionMs())) plex.fire { setWatched(item.ratingKey, true) }
+    }
+
+    /**
+     * The screen stays on while playing. Paused for 5 minutes, it's let go, so the TV's own screensaver
+     * or dimming protects the OLED panel; playing again holds it on again.
+     */
+    private var screenJob: Job? = null
+
+    private fun holdScreen(playing: Boolean) {
+        screenJob?.cancel()
+        if (playing) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            screenJob = lifecycleScope.launch {
+                delay(5 * 60_000)
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+    }
 
     private fun report(state: String) {
         if (released) return
@@ -268,9 +297,18 @@ class PlayerActivity : ComponentActivity() {
             previewJob?.cancel()
             previewJob = launch { previews.value = PreviewThumbs.load(plex, part, cacheDir) }
             triedConversion = false
-            val chosen = PlexTracks.audioStreams(part).let { s -> s.firstOrNull { it.selected } ?: s.firstOrNull() }
+            retried = false
+            // Plex's selection for the file, unless languages were picked for this show.
+            val languages = item.grandparentRatingKey?.let { showLanguages[it] } ?: Languages(null, null)
+            val plexAudio = PlexTracks.audioStreams(part).let { s -> s.firstOrNull { it.selected } ?: s.firstOrNull() }
+            val plexSubtitle = PlexTracks.subtitleStreams(part).firstOrNull { it.selected }
+            val chosen = languages.audioFor(part, plexAudio)
+            subtitle.value = languages.subtitleFor(part, plexSubtitle)
+            // Plex converts whatever is selected on the server, so a different pick is saved there first.
+            if (chosen?.id != plexAudio?.id || subtitle.value?.id != plexSubtitle?.id) {
+                runCatching { plex.selectStreams(part.id, chosen?.id, subtitle.value?.id ?: 0) }
+            }
             val plan = PlexTracks.planAudio(part, chosen, caps::supportsEncoding)
-            subtitle.value = PlexTracks.subtitleStreams(part).firstOrNull { it.selected }
 
             val start = if (resume) item.viewOffset else 0L
             resume = false
@@ -320,6 +358,7 @@ class PlayerActivity : ComponentActivity() {
     private fun chooseAudio(s: Stream) {
         val item = current.value ?: return
         val part = item.part ?: return
+        item.grandparentRatingKey?.let { showLanguages.setAudio(it, s.languageCode) }
         val plan = PlexTracks.planAudio(part, s, caps::supportsEncoding)
         val position = positionMs()
         val direct = { t: Stream? ->
@@ -366,6 +405,7 @@ class PlayerActivity : ComponentActivity() {
     private fun chooseSubtitle(s: Stream?) {
         val item = current.value ?: return
         val part = item.part ?: return
+        item.grandparentRatingKey?.let { showLanguages.setSubtitle(it, s) }
         subtitle.value = s
         PlexTracks.apply(player, part, audio.value, s)
         lifecycleScope.launch {
@@ -391,15 +431,29 @@ class PlayerActivity : ComponentActivity() {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (player.playbackState != Player.STATE_ENDED) report(if (isPlaying) "playing" else "paused")
+            holdScreen(isPlaying || player.playbackState == Player.STATE_BUFFERING)
         }
 
         override fun onPlaybackStateChanged(state: Int) {
             if (state == Player.STATE_ENDED) next()
         }
 
+        /**
+         * Direct play that fails is retried once from the same spot, then played through Plex's conversion
+         * (straight away for audio the TV can't play); the error shows only when that fails too.
+         */
         override fun onPlayerError(e: PlaybackException) {
-            if (!triedConversion && !converted && isAudioError(e)) playConverted(positionMs())
-            else error.value = "Playback failed.\n${e.errorCodeName}: ${e.message}"
+            val item = current.value
+            val part = item?.part
+            when {
+                converted || triedConversion || item == null || part == null ->
+                    error.value = "Playback failed.\n${e.errorCodeName}: ${e.message}"
+                !retried && !isAudioError(e) -> {
+                    retried = true
+                    playDirect(item, part, positionMs())
+                }
+                else -> playConverted(positionMs())
+            }
         }
     }
 
@@ -466,11 +520,11 @@ class PlayerActivity : ComponentActivity() {
         if (index < queue.size) load() else finish()
     }
 
-    /** The previous/next episode buttons. Leaves the current one as it is, without marking it watched. */
+    /** The previous/next episode buttons. The current one counts as watched only in its end credits or past 95%. */
     private fun skip(by: Int) {
         val target = index + by
         if (target !in queue.indices) return
-        report("stopped")
+        reportStopped()
         index = target
         load()
     }
