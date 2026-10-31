@@ -26,6 +26,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import coil3.SingletonImageLoader
 import com.ember.simpleplex.plex.PlexClient
+import com.ember.simpleplex.update.Updates
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -94,6 +95,30 @@ fun SettingsScreen(plex: PlexClient, nav: Nav) {
 
         SectionTitle("About", Modifier.padding(top = 10.dp))
         Note(Build.describe(context))
+        val update by produceState<Updates.Release?>(null) { value = Updates.newerCached() }
+        var installing by remember { mutableStateOf<String?>(null) }
+        update?.let { release ->
+            Note("Version ${release.version} is available on GitHub. Android asks to confirm the install (and, the first time, to allow Simplex to install apps).")
+            PillButton(
+                label = installing ?: "Install ${release.version}",
+                onClick = {
+                    if (installing == null) {
+                        installing = "Downloading…"
+                        scope.launch {
+                            installing = try {
+                                Updates.install(context, release)
+                                "Waiting for Android…"
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                "Couldn't install: ${e.message}"
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.remembersFocus(memory, "update", default = true),
+            )
+        }
     }
 }
 

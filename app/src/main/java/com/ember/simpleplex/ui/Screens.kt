@@ -63,6 +63,8 @@ import com.ember.simpleplex.plex.FolderEntry
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Library
 import com.ember.simpleplex.plex.PlexClient
+import androidx.compose.runtime.produceState
+import com.ember.simpleplex.update.Updates
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
@@ -146,6 +148,7 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
     var menuFor by remember { mutableStateOf<Item?>(null) }
 
     val context = LocalContext.current
+    val update by produceState<Updates.Release?>(null) { value = Updates.newerCached() }
     // Read again on every visit: Settings changes it.
     val hidden = remember(refresh) { LibraryPrefs(context).hidden }
 
@@ -208,6 +211,16 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                         modifier = Modifier.size(180.dp, 108.dp)
                             .remembersFocus(memory, "l" + lib.key, default = continuing.isEmpty() && i == 0),
                     )
+                }
+                update?.let { release ->
+                    item(key = "update") {
+                        IconTile(
+                            icon = Icons.Next,
+                            label = "Update ${release.version}",
+                            onClick = { nav.push(Screen.Settings) },
+                            modifier = Modifier.size(150.dp, 108.dp).remembersFocus(memory, "update"),
+                        )
+                    }
                 }
                 item(key = "settings") {
                     IconTile(
