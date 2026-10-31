@@ -49,11 +49,8 @@ object PlexTracks {
         /** Play the stream as it is: passed through, or stereo anyway. */
         PLAY,
 
-        /** TrueHD without a compatibility track: Plex converts it, however it decides to. */
+        /** Multichannel audio that would only reach the receiver as stereo: Plex converts it, however it decides to. */
         CONVERT,
-
-        /** Other multichannel audio the TV can't pass through: play it anyway, with a short warning. */
-        WARN,
     }
 
     data class AudioPlan(val stream: Stream?, val choice: AudioChoice)
@@ -67,8 +64,8 @@ object PlexTracks {
 
     /**
      * Audio that would only reach the receiver as stereo: use a same-language track that passes through
-     * (the file's compatibility track). Without one, Plex converts TrueHD; anything else plays with a
-     * warning. Everything else plays as chosen.
+     * (the file's compatibility track). Without one, Plex converts it (TrueHD, LPCM, FLAC, AAC, ... 5.1/7.1).
+     * Everything else plays as chosen.
      */
     fun planAudio(part: Part, chosen: Stream?, passthrough: (Int) -> Boolean): AudioPlan {
         if (chosen == null || !reachesAsStereo(chosen, passthrough)) return AudioPlan(chosen, AudioChoice.PLAY)
@@ -79,11 +76,7 @@ object PlexTracks {
             .mapNotNull { s -> encoding(s)?.takeIf { it in compatRank && passthrough(it) }?.let { s to compatRank.getValue(it) } }
             .maxByOrNull { it.second }
             ?.first
-        return when {
-            compat != null -> AudioPlan(compat, AudioChoice.PLAY)
-            chosen.codec.equals("truehd", ignoreCase = true) -> AudioPlan(chosen, AudioChoice.CONVERT)
-            else -> AudioPlan(chosen, AudioChoice.WARN)
-        }
+        return if (compat != null) AudioPlan(compat, AudioChoice.PLAY) else AudioPlan(chosen, AudioChoice.CONVERT)
     }
 
     fun subtitleStreams(part: Part) = part.streams.filter { it.streamType == 3 }

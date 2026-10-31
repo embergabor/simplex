@@ -102,7 +102,6 @@ fun PlayerScreen(
     info: PlaybackInfo,
     onAudio: (Stream) -> Unit,
     onSubtitle: (Stream?) -> Unit,
-    warning: String?,
     /** Previous/next episode; null where there's none. */
     onPrevious: (() -> Unit)?,
     onNext: (() -> Unit)?,
@@ -281,15 +280,6 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (warning != null && error == null) {
-            Text(
-                warning,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 28.dp)
-                    .background(Color(0xCC1C1C1E), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
-            )
-        }
         if (error != null) {
             Column(
                 Modifier.align(Alignment.Center).padding(48.dp),

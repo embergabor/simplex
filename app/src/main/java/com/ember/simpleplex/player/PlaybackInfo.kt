@@ -47,7 +47,6 @@ object Describe {
         markers = listOfNotNull(
             "Default".takeIf { s.isDefault },
             "Plex converts".takeIf { choice == PlexTracks.AudioChoice.CONVERT },
-            "Unsupported".takeIf { choice == PlexTracks.AudioChoice.WARN },
         ),
     )
 

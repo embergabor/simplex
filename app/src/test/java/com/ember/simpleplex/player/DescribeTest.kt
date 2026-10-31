@@ -60,8 +60,8 @@ class DescribeTest {
         )
         val pcm = stream(2, "pcm_s24le", channels = 8).copy(title = "Commentary", samplingRate = 44100)
         assertEquals(
-            TrackInfo("Audio 2 of 2", listOf("Title" to "Commentary", "Lang" to "eng", "Format" to "PCM 7.1", "Detail" to "44.1 kHz"), listOf("Unsupported")),
-            Describe.audioTrack(pcm, 2, 2, choice = PlexTracks.AudioChoice.WARN),
+            TrackInfo("Audio 2 of 2", listOf("Title" to "Commentary", "Lang" to "eng", "Format" to "PCM 7.1", "Detail" to "44.1 kHz"), listOf("Plex converts")),
+            Describe.audioTrack(pcm, 2, 2, choice = PlexTracks.AudioChoice.CONVERT),
         )
     }
 

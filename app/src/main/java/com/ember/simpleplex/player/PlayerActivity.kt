@@ -45,8 +45,9 @@ import kotlinx.coroutines.launch
 /**
  * Plays a queue of Plex items. Files are played as they are (direct play); the TV's own decoder handles
  * deinterlacing, and audio goes out as a bitstream when the TV/receiver accept it, else it's decoded here
- * (FFmpeg for TrueHD/DTS). TrueHD without a compatibility track, or audio that can't play at all, is
- * converted by Plex instead, which may convert the video too (always when burning in a subtitle).
+ * (FFmpeg for TrueHD/DTS). Multichannel audio that would only reach the receiver as stereo, without a
+ * compatibility track, or audio that can't play at all, is converted by Plex instead, which may convert the
+ * video too (always when burning in a subtitle).
  */
 @OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
@@ -75,10 +76,6 @@ class PlayerActivity : ComponentActivity() {
 
     /** Whether the converted stream has the selected subtitle burned in. */
     private var burning = false
-
-    /** A short note over the video, e.g. audio this TV can't play as surround. */
-    private val warning = mutableStateOf<String?>(null)
-    private var warningJob: Job? = null
 
     private val current = mutableStateOf<Item?>(null)
     private val audio = mutableStateOf<Stream?>(null)
@@ -157,7 +154,6 @@ class PlayerActivity : ComponentActivity() {
                         input = audioInput.value,
                         output = audioOutput.value,
                     ),
-                    warning = warning.value,
                     onPrevious = { skip(-1) }.takeIf { canPrevious.value },
                     onNext = { skip(1) }.takeIf { canNext.value },
                     planAudio = { s -> part?.let { PlexTracks.planAudio(it, s, caps::supportsEncoding) } ?: PlexTracks.AudioPlan(s, PlexTracks.AudioChoice.PLAY) },
@@ -255,7 +251,6 @@ class PlayerActivity : ComponentActivity() {
             subtitle.value = PlexTracks.subtitleStreams(part).firstOrNull { it.selected }
 
             val start = if (fromStart) 0L else item.viewOffset
-            warnAbout(plan)
             if (plan.choice == PlexTracks.AudioChoice.CONVERT) playConverted(start) else playDirect(item, part, start)
         }
     }
@@ -300,7 +295,6 @@ class PlayerActivity : ComponentActivity() {
         lifecycleScope.launch {
             // Remember the viewer's pick on the server; Plex converts whichever track is selected there.
             runCatching { plex.selectStreams(part.id, s.id, null) }
-            warnAbout(plan)
             when {
                 plan.choice == PlexTracks.AudioChoice.CONVERT -> playConverted(position)
                 converted -> playDirect(item, part, position)
@@ -322,18 +316,6 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    /** Multichannel audio that will only play as stereo, with no compatibility track and no conversion. */
-    private fun warnAbout(plan: PlexTracks.AudioPlan) {
-        val s = plan.stream ?: return
-        if (plan.choice != PlexTracks.AudioChoice.WARN) return
-        val what = "${Describe.codecName(s.codec, s.profile)} ${s.channels?.let(Describe::channels) ?: ""}".trim()
-        warningJob?.cancel()
-        warning.value = "Unsupported audio: $what"
-        warningJob = lifecycleScope.launch {
-            delay(6000)
-            warning.value = null
-        }
-    }
 
     private val listener = object : Player.Listener {
         override fun onTracksChanged(tracks: Tracks) {

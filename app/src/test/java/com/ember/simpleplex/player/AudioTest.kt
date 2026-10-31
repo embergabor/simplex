@@ -39,10 +39,10 @@ class AudioTest {
         assertEquals(PlexTracks.AudioChoice.CONVERT, PlexTracks.planAudio(part(s), s, tv).choice)
     }
 
-    @Test fun warnsForOtherAudioThatOnlyPlaysAsStereo() {
+    @Test fun plexConvertsOtherAudioThatOnlyPlaysAsStereo() {
         for (codec in listOf("pcm_s16le", "flac", "aac", "opus")) {
             val s = audio(codec, 8)
-            assertEquals(codec, PlexTracks.AudioChoice.WARN, PlexTracks.planAudio(part(s), s, tv).choice)
+            assertEquals(codec, PlexTracks.AudioChoice.CONVERT, PlexTracks.planAudio(part(s), s, tv).choice)
         }
     }
 
