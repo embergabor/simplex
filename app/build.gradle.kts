@@ -65,4 +65,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
 
     testImplementation("junit:junit:4.13.2")
+    // The real org.json, in place of the Android stubs, for tests that parse Plex responses.
+    testImplementation("org.json:json:20240303")
 }

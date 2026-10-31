@@ -26,6 +26,8 @@ data class Item(
     val media: List<Media>,
     /** Plex's description; only used for searching episodes. */
     val summary: String? = null,
+    /** Plex labels, e.g. [Episodes.FAVORITE]. Not every list from Plex includes them. */
+    val labels: List<String> = emptyList(),
 ) {
     val isEpisode get() = type == "episode"
 
@@ -99,6 +101,14 @@ sealed interface FolderEntry {
 }
 
 object Episodes {
+    /** The Plex label that marks a favourite episode. */
+    const val FAVORITE = "fav"
+
+    fun isFavorite(item: Item) = item.labels.any { it.equals(FAVORITE, ignoreCase = true) }
+
+    /** The favourites among [ordered], in its order: labelled in the item itself or listed in [labelled]. */
+    fun favorites(ordered: List<Item>, labelled: Set<String>) = ordered.filter { it.ratingKey in labelled || isFavorite(it) }
+
     /** Season order with specials (season 0) last, then episode order. */
     fun ordered(list: List<Item>): List<Item> = list.sortedWith(
         compareBy<Item>({ (it.parentIndex ?: 0).let { s -> if (s == 0) Int.MAX_VALUE else s } }, { it.index ?: 0 })
@@ -150,6 +160,7 @@ internal fun parseItem(o: JSONObject) = Item(
     viewedLeafCount = o.int("viewedLeafCount") ?: 0,
     librarySectionId = o.str("librarySectionID"),
     summary = o.str("summary"),
+    labels = o.optJSONArray("Label").objects().mapNotNull { it.str("tag") },
     media = o.optJSONArray("Media").objects().map { m ->
         Media(
             parts = m.optJSONArray("Part").objects().map { p ->

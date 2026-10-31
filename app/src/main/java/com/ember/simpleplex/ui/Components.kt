@@ -70,8 +70,10 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
+import com.ember.simpleplex.plex.Episodes
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.PlexClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -79,7 +81,11 @@ import kotlinx.coroutines.launch
 
 interface Nav {
     fun push(screen: Screen)
-    fun play(ratingKeys: List<String>, fromStart: Boolean = false, shuffle: Boolean = false)
+    /**
+     * Plays [ratingKeys] from [startAt]. An episode played in order gets its whole show as the queue,
+     * unless [keepQueue] (e.g. a show's favourites, which play on to the next favourite).
+     */
+    fun play(ratingKeys: List<String>, fromStart: Boolean = false, shuffle: Boolean = false, startAt: Int = 0, keepQueue: Boolean = false)
 }
 
 /** Changes whenever lists should reload (returning from the player, marking watched). */
@@ -420,15 +426,31 @@ fun IconPillButton(icon: ImageVector, description: String, onClick: (() -> Unit)
 // --- Hold-OK menu ---
 
 @Composable
-fun ItemMenu(plex: PlexClient, item: Item, nav: Nav, onDismiss: () -> Unit) {
+/** [favorite]: whether the item is a favourite episode, or null where favourites aren't offered. */
+fun ItemMenu(plex: PlexClient, item: Item, nav: Nav, favorite: Boolean? = null, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     val bump = LocalRefreshBump.current
     val first = remember { FocusRequester() }
+    var failed by remember { mutableStateOf<String?>(null) }
     val mark: (Boolean) -> Unit = { watched ->
         scope.launch {
             runCatching { plex.setWatched(item.ratingKey, watched) }
             bump()
             onDismiss()
+        }
+    }
+    // Stays open with the reason if Plex didn't save it, so a failure doesn't look like success.
+    val setFavorite: (Boolean) -> Unit = { on ->
+        scope.launch {
+            try {
+                plex.setLabel(item.ratingKey, Episodes.FAVORITE, on)
+                bump()
+                onDismiss()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failed = "Couldn't save the favourite. ${e.message}"
+            }
         }
     }
     // The menu opens while OK is still held: the remote keeps repeating OK and then releases it, which
@@ -452,6 +474,10 @@ fun ItemMenu(plex: PlexClient, item: Item, nav: Nav, onDismiss: () -> Unit) {
             }
             PillButton("Mark as watched", { mark(true) }, Modifier.fillMaxWidth().then(if (item.type == "show") Modifier.focusRequester(first) else Modifier))
             PillButton("Mark as unwatched", { mark(false) }, Modifier.fillMaxWidth())
+            if (favorite != null) {
+                PillButton(if (favorite) "Remove from favorites" else "Add to favorites", { setFavorite(!favorite) }, Modifier.fillMaxWidth())
+            }
+            failed?.let { Text(it, fontSize = 11.sp, color = Palette.Secondary, modifier = Modifier.padding(start = 4.dp, top = 4.dp)) }
         }
         LaunchedEffect(Unit) {
             withFrameNanos { }

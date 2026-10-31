@@ -73,12 +73,14 @@ class MainActivity : ComponentActivity() {
         val nav = remember {
             object : Nav {
                 override fun push(screen: Screen) { stack.add(screen) }
-                override fun play(ratingKeys: List<String>, fromStart: Boolean, shuffle: Boolean) {
+                override fun play(ratingKeys: List<String>, fromStart: Boolean, shuffle: Boolean, startAt: Int, keepQueue: Boolean) {
                     startActivity(
                         Intent(this@MainActivity, PlayerActivity::class.java)
                             .putStringArrayListExtra(PlayerActivity.EXTRA_KEYS, ArrayList(ratingKeys))
                             .putExtra(PlayerActivity.EXTRA_FROM_START, fromStart)
                             .putExtra(PlayerActivity.EXTRA_SHUFFLE, shuffle)
+                            .putExtra(PlayerActivity.EXTRA_START_AT, startAt)
+                            .putExtra(PlayerActivity.EXTRA_KEEP_QUEUE, keepQueue)
                     )
                 }
             }

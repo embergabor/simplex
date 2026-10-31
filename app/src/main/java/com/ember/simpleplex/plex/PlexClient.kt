@@ -160,10 +160,56 @@ class PlexClient private constructor(context: Context) {
         return call(Request.Builder().url(requireNotNull(serverUri) + path).plexHeaders(token).build())
     }
 
-    suspend fun episodes(showKey: String) = get("/library/metadata/$showKey/allLeaves").items()
+    /** A show's episodes. Their library comes from the list itself, since the episodes may not say. */
+    suspend fun episodes(showKey: String): List<Item> {
+        val mc = get("/library/metadata/$showKey/allLeaves")
+        val section = mc.str("librarySectionID")
+        return mc.items().map { if (it.librarySectionId == null) it.copy(librarySectionId = section) else it }
+    }
+
+    /**
+     * Rating keys of the episodes in a library that carry [label]. Asked the way Plex's own filters do:
+     * the label's id first, then the episodes with that id. Empty when no episode has it yet.
+     */
+    suspend fun labelledEpisodes(sectionKey: String, label: String): Set<String> {
+        val tag = get("/library/sections/$sectionKey/label?type=4").optJSONArray("Directory").objects()
+            .firstOrNull { it.str("title").equals(label, ignoreCase = true) } ?: return emptySet()
+        val id = (tag.str("key") ?: return emptySet()).substringAfterLast('=').substringAfterLast('/')
+        return get("/library/sections/$sectionKey/all?type=4&label=${enc(id)}").items()
+            // A list that carries labels must have this one; otherwise Plex ignored the filter.
+            .filter { it.labels.isEmpty() || it.labels.any { l -> l.equals(label, ignoreCase = true) } }
+            .map { it.ratingKey }.toSet()
+    }
+
+    /** Adds or removes a label on one item, keeping its other labels, and checks that Plex kept the change. */
+    suspend fun setLabel(ratingKey: String, label: String, on: Boolean) {
+        val item = metadata(ratingKey)
+        val has = item.labels.any { it.equals(label, ignoreCase = true) }
+        if (has == on) return
+        val section = item.librarySectionId ?: throw IOException("Plex didn't say which library this is in")
+        val type = when (item.type) {
+            "movie" -> 1
+            "show" -> 2
+            "season" -> 3
+            "episode" -> 4
+            else -> throw IOException("Plex can't label a ${item.type}")
+        }
+        val tags = if (on) {
+            (item.labels + label).mapIndexed { i, l -> "label[$i].tag.tag=${enc(l)}" }.joinToString("&")
+        } else {
+            "label[].tag.tag-=${enc(label)}"
+        }
+        send("/library/sections/$section/all?type=$type&id=$ratingKey&$tags&label.locked=1", "PUT")
+        val saved = metadata(ratingKey).labels.any { it.equals(label, ignoreCase = true) }
+        if (saved != on) throw IOException("Plex didn't keep the change")
+    }
 
     /** Full metadata including streams, needed before playback. */
-    suspend fun metadata(ratingKey: String) = get("/library/metadata/$ratingKey").items().first()
+    suspend fun metadata(ratingKey: String): Item {
+        val mc = get("/library/metadata/$ratingKey")
+        val item = mc.items().first()
+        return if (item.librarySectionId == null) item.copy(librarySectionId = mc.str("librarySectionID")) else item
+    }
 
     suspend fun continueWatching(): List<Item> {
         val items = runCatching { get("/hubs/continueWatching/items").items() }

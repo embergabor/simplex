@@ -61,6 +61,8 @@ class PlayerActivity : ComponentActivity() {
     private var shuffle = false
     /** Whether the queue was widened to the show's whole episode list (ordered play only). */
     private var wholeShow = false
+    /** A queue that's never widened, e.g. a show's favourites. */
+    private var keepQueue = false
     private val canPrevious = mutableStateOf(false)
     private val canNext = mutableStateOf(false)
 
@@ -98,6 +100,8 @@ class PlayerActivity : ComponentActivity() {
         queue += intent.getStringArrayListExtra(EXTRA_KEYS).orEmpty()
         fromStart = intent.getBooleanExtra(EXTRA_FROM_START, false)
         shuffle = intent.getBooleanExtra(EXTRA_SHUFFLE, false)
+        keepQueue = intent.getBooleanExtra(EXTRA_KEEP_QUEUE, false)
+        index = intent.getIntExtra(EXTRA_START_AT, 0).coerceIn(0, (queue.size - 1).coerceAtLeast(0))
 
         // Platform renderers first (passthrough or the TV's decoders), FFmpeg after them for audio only.
         val renderers = HardwareVideoRenderersFactory(this)
@@ -240,7 +244,7 @@ class PlayerActivity : ComponentActivity() {
 
             current.value = item
             updateSkips()
-            if (item.isEpisode && !shuffle && !wholeShow) widenToShow(item)
+            if (item.isEpisode && !shuffle && !keepQueue && !wholeShow) widenToShow(item)
             previews.value = null
             previewJob?.cancel()
             previewJob = launch { previews.value = PreviewThumbs.load(plex, part, cacheDir) }
@@ -472,5 +476,7 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_KEYS = "keys"
         const val EXTRA_FROM_START = "fromStart"
         const val EXTRA_SHUFFLE = "shuffle"
+        const val EXTRA_START_AT = "startAt"
+        const val EXTRA_KEEP_QUEUE = "keepQueue"
     }
 }

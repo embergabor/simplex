@@ -284,15 +284,21 @@ fun GridScreen(plex: PlexClient, library: Library, nav: Nav) {
     menuFor?.let { ItemMenu(plex, it, nav) { menuFor = null } }
 }
 
-// --- One show: Play / Shuffle, then one row per season ---
+// --- One show: Play / Shuffle, its favourite episodes, then one row per season ---
 
 @Composable
 fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
     val refresh = LocalRefresh.current
-    val result by load(show.ratingKey, refresh) { Episodes.ordered(plex.episodes(show.ratingKey)) }
+    val result by load(show.ratingKey, refresh) {
+        val episodes = Episodes.ordered(plex.episodes(show.ratingKey))
+        val section = episodes.firstNotNullOfOrNull { it.librarySectionId } ?: show.librarySectionId
+        // Favourites are extra: if Plex can't list them, the show still opens.
+        val labelled = section?.let { runCatching { plex.labelledEpisodes(it, Episodes.FAVORITE) }.getOrNull() }.orEmpty()
+        episodes to Episodes.favorites(episodes, labelled)
+    }
     val memory = rememberFocusMemory()
     var menuFor by remember { mutableStateOf<Item?>(null) }
-    val episodes = result?.getOrElse { return ErrorMessage("Couldn't load ${show.title}.\n${it.message}") } ?: return
+    val (episodes, favorites) = result?.getOrElse { return ErrorMessage("Couldn't load ${show.title}.\n${it.message}") } ?: return
     if (episodes.isEmpty()) return Message("${show.title} has no episodes.")
 
     val next = Episodes.nextUp(episodes)
@@ -327,6 +333,41 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
                             onClick = { nav.play(episodes.shuffled().map { it.ratingKey }, fromStart = true, shuffle = true) },
                             modifier = Modifier.remembersFocus(memory, "shuffle"),
                         )
+                        if (favorites.isNotEmpty()) {
+                            PillButton(
+                                label = "Shuffle favorites",
+                                icon = Icons.Shuffle,
+                                onClick = { nav.play(favorites.shuffled().map { it.ratingKey }, fromStart = true, shuffle = true) },
+                                modifier = Modifier.remembersFocus(memory, "shuffleFavorites"),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        // Played from here, favourites play on to the next favourite.
+        if (favorites.isNotEmpty()) {
+            item(key = "favorites") {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    SectionTitle("Favorites", Modifier.padding(horizontal = 48.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    ) {
+                        itemsIndexed(favorites, key = { _, ep -> ep.ratingKey }) { i, ep ->
+                            WideCard(
+                                imageUrl = plex.image(ep.thumb, 352, 198),
+                                title = ep.title,
+                                subtitle = ep.episodeLabel,
+                                subtitleFirst = true,
+                                progress = ep.progress,
+                                watched = ep.watched,
+                                onClick = { nav.play(favorites.map { it.ratingKey }, startAt = i, keepQueue = true) },
+                                onLongClick = { menuFor = ep },
+                                width = 176.dp,
+                                modifier = Modifier.remembersFocus(memory, "fav" + ep.ratingKey),
+                            )
+                        }
                     }
                 }
             }
@@ -334,7 +375,7 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
         seasons.forEachIndexed { si, (number, eps) ->
             item(key = "season$number") {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (si > 0) {
+                    if (si > 0 || favorites.isNotEmpty()) {
                         Box(Modifier.padding(horizontal = 48.dp).padding(bottom = 16.dp).fillMaxWidth().height(1.dp).background(Palette.Divider))
                     }
                     SectionTitle(if (number == 0) "Specials" else "Season $number", Modifier.padding(horizontal = 48.dp))
@@ -361,7 +402,7 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
             }
         }
     }
-    menuFor?.let { ItemMenu(plex, it, nav) { menuFor = null } }
+    menuFor?.let { m -> ItemMenu(plex, m, nav, favorite = favorites.any { it.ratingKey == m.ratingKey }) { menuFor = null } }
 }
 
 // --- Other videos, by folder ---
