@@ -93,8 +93,7 @@ fun PlexVerseScreen(plex: PlexClient, nav: Nav) {
         Row(Modifier.padding(horizontal = 48.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             IconTile(Icons.Film, "Movies", { nav.push(Screen.VerseGrid(Category.MOVIES)) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "movies", default = true))
             IconTile(Icons.Tv, "Series", { nav.push(Screen.VerseGrid(Category.SERIES)) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "series"))
-            // ponytail: Videos opens nothing until step 7.
-            IconTile(Icons.Folder, "Videos", {}, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "videos"))
+            IconTile(Icons.Folder, "Videos", { nav.push(Screen.VerseVideos) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "videos"))
             IconTile(Icons.Edit, "Customize", { nav.push(Screen.PlexVerseSetup) }, Modifier.size(108.dp, 108.dp).remembersFocus(memory, "customize"))
         }
     }
@@ -201,6 +200,53 @@ fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
     menuFor?.let { entry ->
         val copies = entry.sources.mapNotNull { s -> connected[s.machineId]?.let { Copy(it, s.item) } }
         ItemMenu(copies.first().server, entry.item, nav, copies = copies, playFrom = true) { menuFor = null }
+    }
+}
+
+/**
+ * The "other videos" libraries of every server, one tile each in server order. They aren't merged:
+ * they're folders on disk, and two "Training" folders needn't hold the same videos.
+ */
+@Composable
+fun VerseVideosScreen(plex: PlexClient, nav: Nav) {
+    val context = LocalContext.current
+    val store = remember { VerseStore.get(context, plex) }
+    LaunchedEffect(Unit) { store.refresh() }
+    val states by store.servers.collectAsState()
+    val connected by store.connected.collectAsState()
+    val setup = remember { PlexVersePrefs(context).setup }
+    val names = remember { plex.cachedServers.associate { it.machineId to it.name } }
+    val libraries = setup.ordered(setup.libraries.keys.map { it.substringBefore('/') }.distinct()).flatMap { id ->
+        setup.storedFor(id).filter { it.value.category == Category.VIDEOS }.map { (key, choice) -> Triple(id, key.substringAfter('/'), choice.title) }
+    }
+    val memory = rememberFocusMemory()
+
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(5),
+        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 40.dp),
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(Modifier.padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ScreenTitle("Videos")
+                UpdatingBar(states, Modifier)
+                if (libraries.isEmpty()) Text("No libraries are set to Videos. Change that in PlexVerse → Customize.", fontSize = 13.sp, color = Palette.Secondary)
+            }
+        }
+        items(libraries, key = { (id, section, _) -> "$id/$section" }) { (id, section, title) ->
+            val server = connected[id]
+            val failed = states[id] is ServerState.Failed
+            IconTile(
+                icon = Icons.Folder,
+                label = listOfNotNull(title, names[id], "not reachable".takeIf { failed }).joinToString("\n"),
+                onClick = {
+                    if (server != null) nav.push(Screen.Folder(Library(section, title, Library.Kind.OTHER), null, emptyList(), id))
+                },
+                modifier = Modifier.height(130.dp).alpha(if (failed) 0.5f else 1f)
+                    .remembersFocus(memory, "$id/$section", default = id == libraries.first().first && section == libraries.first().second),
+            )
+        }
     }
 }
 

@@ -67,11 +67,13 @@ sealed interface Screen {
     data class Grid(val library: Library) : Screen
     /** [sources]: the show's copies across servers (PlexVerse); null for the home server's [show]. */
     data class Show(val show: Item, val sources: List<Source>? = null) : Screen
-    data class Folder(val library: Library, val key: String?, val path: List<String>) : Screen
+    /** [machineId]: the library's server, for PlexVerse; null for the home server. */
+    data class Folder(val library: Library, val key: String?, val path: List<String>, val machineId: String? = null) : Screen
     data object PlexVerse : Screen
     data object Kids : Screen
     data object PlexVerseSetup : Screen
     data class VerseGrid(val category: Category) : Screen
+    data object VerseVideos : Screen
 }
 
 // --- Sign in ---
@@ -531,7 +533,7 @@ fun FolderScreen(plex: PlexServer, library: Library, key: String?, path: List<St
                 icon = Icons.Folder,
                 label = f.title,
                 horizontal = true,
-                onClick = { nav.push(Screen.Folder(library, f.key, path + f.title)) },
+                onClick = { nav.push(Screen.Folder(library, f.key, path + f.title, plex.machineId)) },
                 modifier = Modifier.fillMaxWidth().height(60.dp).remembersFocus(memory, f.key, default = f.key == firstKey),
             )
         }

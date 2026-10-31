@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.ember.simpleplex.player.PlayerActivity
 import com.ember.simpleplex.plex.PlexClient
+import com.ember.simpleplex.plex.PlexServer
 import com.ember.simpleplex.ui.AppTheme
 import com.ember.simpleplex.ui.Copy
 import com.ember.simpleplex.ui.FolderScreen
@@ -36,6 +37,8 @@ import com.ember.simpleplex.ui.Screen
 import com.ember.simpleplex.ui.SearchScreen
 import com.ember.simpleplex.ui.ShowScreen
 import com.ember.simpleplex.ui.VerseGridScreen
+import com.ember.simpleplex.ui.VerseVideosScreen
+import com.ember.simpleplex.ui.Message
 import com.ember.simpleplex.ui.VerseStore
 import com.ember.simpleplex.ui.SignInScreen
 
@@ -115,13 +118,22 @@ class MainActivity : ComponentActivity() {
                 Screen.Search -> SearchScreen(home, nav)
                 is Screen.Grid -> GridScreen(home, s.library, nav)
                 is Screen.Show -> ShowScreen(copiesOf(plex, s), nav)
-                is Screen.Folder -> FolderScreen(home, s.library, s.key, s.path, nav)
+                is Screen.Folder -> serverOf(plex, s.machineId)?.let { FolderScreen(it, s.library, s.key, s.path, nav) }
+                    ?: Message("This library's server can't be reached right now.")
                 Screen.PlexVerse -> PlexVerseScreen(plex, nav)
                 Screen.Kids -> KidsScreen(plex, nav)
                 Screen.PlexVerseSetup -> PlexVerseSetupScreen(plex, nav)
                 is Screen.VerseGrid -> VerseGridScreen(plex, s.category, nav)
+                Screen.VerseVideos -> VerseVideosScreen(plex, nav)
             }
         }
+    }
+
+    /** The server with [machineId] if PlexVerse has reached it, or the home server for null. */
+    private fun serverOf(plex: PlexClient, machineId: String?): PlexServer? {
+        val home = requireNotNull(plex.home)
+        if (machineId == null || machineId == home.machineId) return home
+        return VerseStore.get(this, plex).connected.value[machineId]
     }
 
     /** A show's copies on the servers PlexVerse has reached, or the home server's show. */
