@@ -2,6 +2,7 @@
 
 package com.ember.simpleplex.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -49,7 +55,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Border
+import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Icon
+import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Library
@@ -63,6 +72,27 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+
+private const val SEARCH_HINT = "Search titles, or words from an episode's description"
+private val fieldShape = RoundedCornerShape(12.dp)
+
+/** The search field's row on Home. It only looks like a text field: OK opens Search, ready to type. */
+@Composable
+fun SearchBox(onOpen: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        onClick = onOpen,
+        modifier = modifier.fillMaxWidth().height(52.dp),
+        shape = ClickableSurfaceDefaults.shape(fieldShape),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+        colors = ClickableSurfaceDefaults.colors(containerColor = Palette.Tile, focusedContainerColor = Palette.Tile),
+        border = ClickableSurfaceDefaults.border(focusedBorder = Border(BorderStroke(3.dp, Palette.Ink), shape = fieldShape)),
+    ) {
+        Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Search, contentDescription = null, tint = Palette.Secondary, modifier = Modifier.size(20.dp))
+            Text(SEARCH_HINT, modifier = Modifier.padding(start = 12.dp), fontSize = 16.sp, color = Palette.Secondary, maxLines = 1)
+        }
+    }
+}
 
 /** Episodes listed per show at most; a broader word than that needs narrowing down anyway. */
 private const val MAX_EPISODES = 100
@@ -172,6 +202,9 @@ fun SearchScreen(plex: PlexClient, nav: Nav) {
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     var fieldFocused by remember { mutableStateOf(false) }
+    // The keyboard only opens on OK (or on arriving here, which was an OK on Home's search field),
+    // never just because focus passes over the field.
+    var typing by remember { mutableStateOf(false) }
 
     val terms = remember(query) { SearchMatch.terms(query) }
     val searching = query.trim().length >= 2
@@ -192,6 +225,7 @@ fun SearchScreen(plex: PlexClient, nav: Nav) {
         if (query.isEmpty()) {
             withFrameNanos { }
             runCatching { field.requestFocus() }
+            typing = true
             keyboard?.show()
         }
     }
@@ -209,15 +243,15 @@ fun SearchScreen(plex: PlexClient, nav: Nav) {
                 Modifier
                     .fillMaxWidth()
                     .height(52.dp)
-                    .background(Palette.Tile, RoundedCornerShape(12.dp))
-                    .then(if (fieldFocused) Modifier.border(3.dp, Palette.Ink, RoundedCornerShape(12.dp)) else Modifier)
+                    .background(Palette.Tile, fieldShape)
+                    .then(if (fieldFocused) Modifier.border(3.dp, Palette.Ink, fieldShape) else Modifier)
                     .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Search, contentDescription = null, tint = Palette.Secondary, modifier = Modifier.size(20.dp))
                 Box(Modifier.padding(start = 12.dp).weight(1f)) {
                     if (query.isEmpty()) {
-                        Text("Titles, or words from an episode's description", fontSize = 16.sp, color = Palette.Secondary, maxLines = 1)
+                        Text(SEARCH_HINT, fontSize = 16.sp, color = Palette.Secondary, maxLines = 1)
                     }
                     BasicTextField(
                         value = query,
@@ -225,16 +259,29 @@ fun SearchScreen(plex: PlexClient, nav: Nav) {
                         singleLine = true,
                         textStyle = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Palette.Ink),
                         cursorBrush = SolidColor(Palette.Ink),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, showKeyboardOnFocus = false),
                         // Search on the keyboard: close it and go down to the results.
                         keyboardActions = KeyboardActions(onSearch = {
+                            typing = false
                             keyboard?.hide()
                             focus.moveFocus(FocusDirection.Down)
                         }),
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusRequester(field)
-                            .onFocusChanged { fieldFocused = it.isFocused },
+                            .onFocusChanged {
+                                fieldFocused = it.isFocused
+                                if (!it.isFocused) typing = false
+                            }
+                            .onPreviewKeyEvent { e ->
+                                val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                                if (!ok || typing) return@onPreviewKeyEvent false
+                                if (e.type == KeyEventType.KeyDown) {
+                                    typing = true
+                                    keyboard?.show()
+                                }
+                                true
+                            },
                     )
                 }
             }

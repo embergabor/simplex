@@ -3,6 +3,8 @@
 package com.ember.simpleplex.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -143,7 +145,11 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
     val continuing = (cont?.getOrNull() ?: if (cont == null) return else emptyList())
         .filter { it.librarySectionId == null || it.librarySectionId !in hidden }
 
-    Column(Modifier.fillMaxSize().padding(vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+    // Scrolls if the rows don't all fit, following focus.
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 36.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
         if (continuing.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
@@ -167,6 +173,10 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                 }
             }
         }
+        SearchBox(
+            onOpen = { nav.push(Screen.Search) },
+            modifier = Modifier.padding(horizontal = 48.dp).remembersFocus(memory, "search"),
+        )
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SectionTitle("Libraries", Modifier.padding(horizontal = 48.dp))
             LazyRow(
@@ -186,14 +196,6 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                         },
                         modifier = Modifier.size(180.dp, 108.dp)
                             .remembersFocus(memory, "l" + lib.key, default = continuing.isEmpty() && i == 0),
-                    )
-                }
-                item(key = "search") {
-                    IconTile(
-                        icon = Icons.Search,
-                        label = "Search",
-                        onClick = { nav.push(Screen.Search) },
-                        modifier = Modifier.size(108.dp, 108.dp).remembersFocus(memory, "search"),
                     )
                 }
                 item(key = "edit") {
