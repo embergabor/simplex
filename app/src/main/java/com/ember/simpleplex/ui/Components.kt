@@ -74,6 +74,9 @@ import com.ember.simpleplex.plex.Episodes
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.PlexServer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -82,8 +85,9 @@ import kotlinx.coroutines.launch
 interface Nav {
     fun push(screen: Screen)
     /**
-     * Plays [ratingKeys] from [startAt]. An episode played in order gets its whole show as the queue,
-     * unless [keepQueue] (e.g. a show's favourites, which play on to the next favourite).
+     * Plays [ratingKeys] from [startAt]. Each is a ratingKey on the home server, or a [queueEntry] of
+     * copies on several servers, tried in order. An episode played in order gets its whole show as the
+     * queue, unless [keepQueue] (e.g. a show's favourites, which play on to the next favourite).
      */
     fun play(ratingKeys: List<String>, fromStart: Boolean = false, shuffle: Boolean = false, startAt: Int = 0, keepQueue: Boolean = false)
 }
@@ -429,15 +433,27 @@ fun IconPillButton(icon: ImageVector, description: String, onClick: (() -> Unit)
 // --- Hold-OK menu ---
 
 @Composable
-/** [favorite]: whether the item is a favourite episode, or null where favourites aren't offered. */
-fun ItemMenu(plex: PlexServer, item: Item, nav: Nav, favorite: Boolean? = null, onDismiss: () -> Unit) {
+/**
+ * [favorite]: whether the item is a favourite episode, or null where favourites aren't offered.
+ * [copies]: the item on every server that has it; watched and favourite are saved on each of them.
+ * [playFrom] lists them so one can be picked by hand.
+ */
+fun ItemMenu(
+    plex: PlexServer,
+    item: Item,
+    nav: Nav,
+    favorite: Boolean? = null,
+    copies: List<Copy> = listOf(Copy(plex, item)),
+    playFrom: Boolean = false,
+    onDismiss: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
     val bump = LocalRefreshBump.current
     val first = remember { FocusRequester() }
     var failed by remember { mutableStateOf<String?>(null) }
     val mark: (Boolean) -> Unit = { watched ->
         scope.launch {
-            runCatching { plex.setWatched(item.ratingKey, watched) }
+            copies.map { c -> async { runCatching { c.server.setWatched(c.item.ratingKey, watched) } } }.awaitAll()
             bump()
             onDismiss()
         }
@@ -446,7 +462,8 @@ fun ItemMenu(plex: PlexServer, item: Item, nav: Nav, favorite: Boolean? = null, 
     val setFavorite: (Boolean) -> Unit = { on ->
         scope.launch {
             try {
-                plex.setLabel(item.ratingKey, Episodes.FAVORITE, on)
+                // In its own scope, so a server that fails is caught below instead of failing the screen's scope.
+                coroutineScope { copies.map { c -> async { c.server.setLabel(c.item.ratingKey, Episodes.FAVORITE, on) } }.awaitAll() }
                 bump()
                 onDismiss()
             } catch (e: CancellationException) {
@@ -473,7 +490,13 @@ fun ItemMenu(plex: PlexServer, item: Item, nav: Nav, favorite: Boolean? = null, 
         ) {
             Text(item.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp, bottom = 7.dp))
             if (item.type != "show") {
-                PillButton("Play from beginning", { onDismiss(); nav.play(listOf(item.ratingKey), fromStart = true) }, Modifier.fillMaxWidth().focusRequester(first))
+                PillButton("Play from beginning", { onDismiss(); nav.play(listOf(queueEntry(copies)), fromStart = true) }, Modifier.fillMaxWidth().focusRequester(first))
+            }
+            if (playFrom && item.type != "show" && copies.size > 1) {
+                Text("Play from…", fontSize = 12.sp, color = Palette.Secondary, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+                for (c in copies) {
+                    PillButton(c.server.name.ifEmpty { "Server" }, { onDismiss(); nav.play(listOf(c.ref)) }, Modifier.fillMaxWidth())
+                }
             }
             PillButton("Mark as watched", { mark(true) }, Modifier.fillMaxWidth().then(if (item.type == "show") Modifier.focusRequester(first) else Modifier))
             PillButton("Mark as unwatched", { mark(false) }, Modifier.fillMaxWidth())

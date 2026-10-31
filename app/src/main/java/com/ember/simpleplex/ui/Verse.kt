@@ -21,7 +21,17 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 /** One copy of a title, on the server with [machineId]. */
-data class Source(val machineId: String, val item: Item)
+data class Source(val machineId: String, val item: Item) {
+    val ref get() = "$machineId|${item.ratingKey}"
+}
+
+/** One copy of an item on a server that's been reached. */
+data class Copy(val server: PlexServer, val item: Item) {
+    val ref get() = server.ref(item.ratingKey)
+}
+
+/** A player queue entry that tries [copies] in order. */
+fun queueEntry(copies: List<Copy>) = copies.joinToString(",") { it.ref }
 
 /**
  * A title merged across servers. [sources] are in server preference order; [item] is the first one's,
@@ -39,8 +49,12 @@ object Verse {
     fun matchKeys(item: Item): List<String> =
         item.guids.filter { shared.containsMatchIn(it) }.ifEmpty { listOf("title:${normalize(item.title)}|${item.year ?: ""}") }
 
-    /** Groups [sources] that share any match key (a union-find over the keys), sorted A–Z. */
-    fun merge(sources: List<Source>, order: List<String>): List<VerseEntry> {
+    /** An episode's: its shared ids, or without any, its season and number. */
+    fun episodeKeys(item: Item): List<String> =
+        item.guids.filter { shared.containsMatchIn(it) }.ifEmpty { listOf("episode:${item.parentIndex ?: 0}|${item.index ?: 0}") }
+
+    /** Groups [sources] that share any of their [keys] (a union-find over the keys), sorted A–Z. */
+    fun merge(sources: List<Source>, order: List<String>, keys: (Item) -> List<String> = ::matchKeys): List<VerseEntry> {
         val parent = IntArray(sources.size) { it }
         fun root(i: Int): Int {
             var x = i
@@ -49,7 +63,7 @@ object Verse {
         }
         val owner = HashMap<String, Int>()
         sources.forEachIndexed { i, s ->
-            for (k in matchKeys(s.item)) owner.putIfAbsent(k, i)?.let { parent[root(i)] = root(it) }
+            for (k in keys(s.item)) owner.putIfAbsent(k, i)?.let { parent[root(i)] = root(it) }
         }
         val rank = order.withIndex().associate { (i, id) -> id to i }
         return sources.indices.groupBy(::root).values.map { members ->
@@ -57,7 +71,7 @@ object Verse {
             val first = group.first().item
             val newest = group.maxBy { it.item.lastViewedAt }.item
             VerseEntry(
-                key = matchKeys(first).first(),
+                key = keys(first).first(),
                 item = first.copy(viewOffset = newest.viewOffset, viewCount = newest.viewCount, viewedLeafCount = newest.viewedLeafCount),
                 sources = group,
             )

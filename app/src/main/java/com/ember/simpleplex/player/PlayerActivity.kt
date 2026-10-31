@@ -52,11 +52,19 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
 
+    private lateinit var client: PlexClient
+    /** The server playing the current item. */
     private lateinit var plex: PlexServer
     private lateinit var player: ExoPlayer
     private lateinit var caps: AudioCapabilities
 
+    /** Each entry: a ratingKey on the home server, or "machineId|ratingKey" sources, comma-separated, in the order to try. */
     private val queue = mutableListOf<String>()
+    /** Which of the current entry's sources is playing, and whether anything has played from it yet. */
+    private var sourceAt = 0
+    private var started = false
+    /** The current item's copies on the other servers, which get its progress and watched state too. */
+    private var others: List<Pair<PlexServer, String>> = emptyList()
     private var index = 0
     private var fromStart = false
     private var shuffle = false
@@ -95,7 +103,8 @@ class PlayerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        plex = requireNotNull(PlexClient.get(this).home)
+        client = PlexClient.get(this)
+        plex = requireNotNull(client.home)
         // What the TV accepts as a bitstream on its current output (here: eARC to the receiver).
         caps = AudioCapabilities.getCapabilities(this, AudioAttributes.DEFAULT, null)
         queue += intent.getStringArrayListExtra(EXTRA_KEYS).orEmpty()
@@ -223,25 +232,61 @@ class PlayerActivity : ComponentActivity() {
         val item = current.value ?: return
         val time = positionMs()
         plex.fire { timeline(item.ratingKey, state, time, item.duration) }
+        // Only where playback rests, not on every tick.
+        if (state != "playing") for ((server, key) in others) server.fire { setProgress(key, time) }
     }
 
-    private fun load() {
+    /** The current entry's sources as (machine id or null for the home server, ratingKey). */
+    private fun sources(entry: String) = entry.split(',').map { s ->
+        if ('|' in s) s.substringBefore('|') to s.substringAfter('|') else null to s
+    }
+
+    private suspend fun serverFor(machineId: String?) = if (machineId == null) client.home else client.server(machineId)
+
+    /**
+     * Plays the current queue entry from its first source that answers, starting at source [from]. A
+     * server that can't be reached or has no file is skipped; only when every source failed is it an error.
+     */
+    private fun load(from: Int = 0) {
         loadJob?.cancel()
         loadJob = lifecycleScope.launch {
-            val key = queue.getOrNull(index) ?: return@launch finish()
+            val sources = sources(queue.getOrNull(index) ?: return@launch finish())
             error.value = null
-            val item = try {
-                plex.metadata(key)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error.value = "Couldn't load this video.\n${e.message}"
+            started = false
+            var failure: String? = null
+            var found: Triple<Int, PlexServer, Item>? = null
+            for (i in from until sources.size) {
+                val (id, key) = sources[i]
+                val server = serverFor(id)
+                if (server == null) {
+                    failure = "The server with this video can't be reached."
+                    continue
+                }
+                val item = try {
+                    server.metadata(key)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failure = "Couldn't load this video.\n${e.message}"
+                    continue
+                }
+                if (item.part == null) {
+                    failure = "Plex has no file for “${item.title}”."
+                    continue
+                }
+                found = Triple(i, server, item)
+                break
+            }
+            val (at, server, item) = found ?: run {
+                error.value = failure ?: "Couldn't load this video."
                 return@launch
             }
-            val part = item.part ?: run {
-                error.value = "Plex has no file for “${item.title}”."
-                return@launch
-            }
+            val part = item.part!!
+            sourceAt = at
+            plex = server
+            others = emptyList()
+            launch { others = sources.filterIndexed { j, _ -> j != at }.mapNotNull { (id, key) -> serverFor(id)?.let { it to key } } }
+            if (at > 0) note("Playing from ${server.name.ifEmpty { "another server" }}")
 
             current.value = item
             updateSkips()
@@ -328,8 +373,13 @@ class PlayerActivity : ComponentActivity() {
         val s = plan.stream ?: return
         if (plan.choice != PlexTracks.AudioChoice.WARN) return
         val what = "${Describe.codecName(s.codec, s.profile)} ${s.channels?.let(Describe::channels) ?: ""}".trim()
+        note("Unsupported audio: $what")
+    }
+
+    /** A short line over the video for a few seconds. */
+    private fun note(text: String) {
         warningJob?.cancel()
-        warning.value = "Unsupported audio: $what"
+        warning.value = text
         warningJob = lifecycleScope.launch {
             delay(6000)
             warning.value = null
@@ -349,6 +399,7 @@ class PlayerActivity : ComponentActivity() {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying) started = true
             if (player.playbackState != Player.STATE_ENDED) report(if (isPlaying) "playing" else "paused")
         }
 
@@ -358,6 +409,8 @@ class PlayerActivity : ComponentActivity() {
 
         override fun onPlayerError(e: PlaybackException) {
             if (!triedConversion && !converted && isAudioError(e)) playConverted(positionMs())
+            // Nothing played yet: the next server with this title may do better. Mid-film errors stay errors.
+            else if (!started && sourceAt + 1 < sources(queue[index]).size) load(sourceAt + 1)
             else error.value = "Playback failed.\n${e.errorCodeName}: ${e.message}"
         }
     }
@@ -414,6 +467,7 @@ class PlayerActivity : ComponentActivity() {
             timeline(item.ratingKey, "stopped", item.duration, item.duration)
             setWatched(item.ratingKey, true)
         }
+        for ((server, key) in others) server.fire { setWatched(key, true) }
         index++
         if (index < queue.size) load() else finish()
     }
@@ -433,14 +487,16 @@ class PlayerActivity : ComponentActivity() {
      */
     private fun widenToShow(item: Item) {
         val showKey = item.grandparentRatingKey ?: return
+        val server = plex
+        val entry = queue.getOrNull(index)
         wholeShow = true
         lifecycleScope.launch {
-            val episodes = runCatching { Episodes.ordered(plex.episodes(showKey)) }.getOrNull() ?: return@launch
+            val episodes = runCatching { Episodes.ordered(server.episodes(showKey)) }.getOrNull() ?: return@launch
             val at = episodes.indexOfFirst { it.ratingKey == item.ratingKey }
-            // Still on the same episode? Then line the queue up around it.
-            if (at < 0 || queue.getOrNull(index) != item.ratingKey) return@launch
+            // Still on the same episode? Then line the queue up around it, on the server that's playing.
+            if (at < 0 || queue.getOrNull(index) != entry) return@launch
             queue.clear()
-            queue += episodes.map { it.ratingKey }
+            queue += episodes.map { server.ref(it.ratingKey) }
             index = at
             updateSkips()
         }

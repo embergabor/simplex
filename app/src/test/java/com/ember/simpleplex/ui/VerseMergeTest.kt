@@ -75,4 +75,21 @@ class VerseMergeTest {
         )
         assertEquals(listOf("The Abyss", "Zorro"), merged.map { it.item.title })
     }
+
+    @Test fun episodesMatchByGuidOrSeasonAndNumber() {
+        fun ep(key: String, season: Int, number: Int, guids: List<String> = emptyList()) =
+            item(key, "Pilot", guids = guids).copy(type = "episode", parentIndex = season, index = number)
+        val merged = Verse.merge(
+            listOf(
+                Source("A", ep("1", 1, 1, listOf("plex://episode/p1"))),
+                Source("B", ep("7", 1, 1, listOf("plex://episode/p1", "tvdb://11"))),
+                Source("A", ep("2", 1, 2)),
+                Source("B", ep("8", 1, 2)),
+                Source("B", ep("9", 2, 1)),
+            ),
+            order = listOf("A", "B"),
+            keys = Verse::episodeKeys,
+        )
+        assertEquals(setOf(listOf("1", "7"), listOf("2", "8"), listOf("9")), merged.map { e -> e.sources.map { it.item.ratingKey } }.toSet())
+    }
 }

@@ -62,7 +62,7 @@ class PreviewThumbs private constructor(
             // HDR10 and Dolby Vision with an HDR10 base. Profile 5 uses its own colors, which this can't fix.
             val pq = video?.colorTrc == "smpte2084" && video.doviProfile != 5
             runCatching {
-                val file = File(cacheDir, "previews-${part.id}.bif")
+                val file = File(cacheDir, "previews-${plex.machineId ?: ""}-${part.id}.bif")
                 if (!file.exists()) plex.download("/library/parts/${part.id}/indexes/sd", file)
                 parse(file, toneMap = pq)
             }.getOrNull()

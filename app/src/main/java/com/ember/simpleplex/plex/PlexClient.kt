@@ -37,7 +37,7 @@ class PlexClient private constructor(context: Context) {
     var home: PlexServer? = run {
         val uri = prefs.getString("serverUri", null)
         val token = prefs.getString("token", null)
-        if (uri != null && token != null) PlexServer(uri, token, prefs.getString("machineId", null), this) else null
+        if (uri != null && token != null) PlexServer(uri, token, prefs.getString("machineId", null), this, prefs.getString("serverName", null) ?: "") else null
     }
         private set
 
@@ -53,7 +53,7 @@ class PlexClient private constructor(context: Context) {
         .readTimeout(3, TimeUnit.SECONDS)
         .build()
 
-    /** For reports that must outlive a screen (timeline, watched state). */
+    /** For reports that must outlive a screen (timeline, watched state). Each runs on its own, so one failing never stops another. */
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun fire(block: suspend () -> Unit) {
@@ -106,8 +106,9 @@ class PlexClient private constructor(context: Context) {
                         .putString("serverUri", uri)
                         .putString("token", server.accessToken)
                         .putString("machineId", server.machineId)
+                        .putString("serverName", server.name)
                         .apply()
-                    home = PlexServer(uri, server.accessToken, server.machineId, this)
+                    home = PlexServer(uri, server.accessToken, server.machineId, this, server.name)
                     return
                 }
             }
@@ -140,8 +141,8 @@ class PlexClient private constructor(context: Context) {
         // Installs from before the home server's id was kept: it's the one with the same token.
         val h = home
         if (h != null && h.machineId == null) servers.find { it.accessToken == h.token }?.let { s ->
-            prefs.edit().putString("machineId", s.machineId).apply()
-            home = PlexServer(h.uri, h.token, s.machineId, this)
+            prefs.edit().putString("machineId", s.machineId).putString("serverName", s.name).apply()
+            home = PlexServer(h.uri, h.token, s.machineId, this, s.name)
         }
         return servers
     }
@@ -162,7 +163,7 @@ class PlexClient private constructor(context: Context) {
             candidates.distinct().forEach { launch { if (probe(it, info.accessToken)) send(it) } }
         }.firstOrNull() ?: return null
         prefs.edit().putString("uri-$machineId", uri).apply()
-        return PlexServer(uri, info.accessToken, machineId, this).also { connected[machineId] = it }
+        return PlexServer(uri, info.accessToken, machineId, this, info.name).also { connected[machineId] = it }
     }
 
     private suspend fun probe(uri: String, token: String) = runCatching {

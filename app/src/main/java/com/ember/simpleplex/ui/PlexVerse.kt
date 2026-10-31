@@ -141,7 +141,7 @@ fun VerseGridScreen(plex: PlexClient, category: Category, nav: Nav) {
     val entries = remember(lists) { store.entries(category, lists) }
     val memory = rememberFocusMemory()
     val title = if (category == Category.SERIES) "Series" else "Movies"
-    val home = plex.home
+    var menuFor by remember { mutableStateOf<VerseEntry?>(null) }
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(6),
@@ -161,8 +161,6 @@ fun VerseGridScreen(plex: PlexClient, category: Category, nav: Nav) {
         items(entries, key = { it.key }) { entry ->
             // The poster from the first source whose server has answered.
             val shown = entry.sources.firstOrNull { it.machineId in connected }
-            // ponytail: only the home server's copy plays until the player knows other servers (step 6).
-            val onHome = entry.sources.firstOrNull { it.machineId == home?.machineId }?.item
             PosterCard(
                 title = entry.item.title,
                 imageUrl = shown?.let { connected[it.machineId]?.image(it.item.thumb, 248, 372) },
@@ -170,12 +168,18 @@ fun VerseGridScreen(plex: PlexClient, category: Category, nav: Nav) {
                 watched = entry.item.watched,
                 badge = if (entry.sources.size > 1) "×${entry.sources.size}" else null,
                 onClick = {
-                    if (onHome == null) return@PosterCard
-                    if (onHome.type == "show") nav.push(Screen.Show(onHome)) else nav.play(listOf(onHome.ratingKey))
+                    if (entry.item.type == "show") nav.push(Screen.Show(entry.item, entry.sources))
+                    else nav.play(listOf(entry.sources.joinToString(",") { it.ref }))
                 },
+                // The menu acts on the copies on servers that answered, so it needs one.
+                onLongClick = { if (entry.sources.any { it.machineId in connected }) menuFor = entry },
                 modifier = Modifier.remembersFocus(memory, entry.key, default = entry == entries.first()),
             )
         }
+    }
+    menuFor?.let { entry ->
+        val copies = entry.sources.mapNotNull { s -> connected[s.machineId]?.let { Copy(it, s.item) } }
+        ItemMenu(copies.first().server, entry.item, nav, copies = copies, playFrom = true) { menuFor = null }
     }
 }
 

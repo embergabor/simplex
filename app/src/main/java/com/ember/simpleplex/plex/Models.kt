@@ -117,9 +117,9 @@ object Episodes {
     fun favorites(ordered: List<Item>, labelled: Set<String>) = ordered.filter { it.ratingKey in labelled || isFavorite(it) }
 
     /** Season order with specials (season 0) last, then episode order. */
-    fun ordered(list: List<Item>): List<Item> = list.sortedWith(
-        compareBy<Item>({ (it.parentIndex ?: 0).let { s -> if (s == 0) Int.MAX_VALUE else s } }, { it.index ?: 0 })
-    )
+    val order: Comparator<Item> = compareBy({ (it.parentIndex ?: 0).let { s -> if (s == 0) Int.MAX_VALUE else s } }, { it.index ?: 0 })
+
+    fun ordered(list: List<Item>): List<Item> = list.sortedWith(order)
 
     /** Index of the episode "Play" should start with: one in progress, else the one after the last watched. */
     fun nextUp(ordered: List<Item>): Int {

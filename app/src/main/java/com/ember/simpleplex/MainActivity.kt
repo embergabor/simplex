@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import com.ember.simpleplex.player.PlayerActivity
 import com.ember.simpleplex.plex.PlexClient
 import com.ember.simpleplex.ui.AppTheme
+import com.ember.simpleplex.ui.Copy
 import com.ember.simpleplex.ui.FolderScreen
 import com.ember.simpleplex.ui.GridScreen
 import com.ember.simpleplex.ui.HomeScreen
@@ -35,6 +36,7 @@ import com.ember.simpleplex.ui.Screen
 import com.ember.simpleplex.ui.SearchScreen
 import com.ember.simpleplex.ui.ShowScreen
 import com.ember.simpleplex.ui.VerseGridScreen
+import com.ember.simpleplex.ui.VerseStore
 import com.ember.simpleplex.ui.SignInScreen
 
 private val TOP = setOf(Screen.Home, Screen.PlexVerse, Screen.Kids)
@@ -112,7 +114,7 @@ class MainActivity : ComponentActivity() {
                 Screen.Home -> HomeScreen(home, nav)
                 Screen.Search -> SearchScreen(home, nav)
                 is Screen.Grid -> GridScreen(home, s.library, nav)
-                is Screen.Show -> ShowScreen(home, s.show, nav)
+                is Screen.Show -> ShowScreen(copiesOf(plex, s), nav)
                 is Screen.Folder -> FolderScreen(home, s.library, s.key, s.path, nav)
                 Screen.PlexVerse -> PlexVerseScreen(plex, nav)
                 Screen.Kids -> KidsScreen(nav)
@@ -120,5 +122,12 @@ class MainActivity : ComponentActivity() {
                 is Screen.VerseGrid -> VerseGridScreen(plex, s.category, nav)
             }
         }
+    }
+
+    /** A show's copies on the servers PlexVerse has reached, or the home server's show. */
+    private fun copiesOf(plex: PlexClient, s: Screen.Show): List<Copy> {
+        val sources = s.sources ?: return listOf(Copy(requireNotNull(plex.home), s.show))
+        val connected = VerseStore.get(this, plex).connected.value
+        return sources.mapNotNull { src -> connected[src.machineId]?.let { Copy(it, src.item) } }
     }
 }
