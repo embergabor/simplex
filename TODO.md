@@ -20,6 +20,23 @@
 
 Decided against for now: moving image subtitles above the open controls, an "Up next" countdown, a clock.
 
+## Screens polish (planned 2026-10-31)
+
+- **Continue watching hold-OK menu** adds "Remove from Continue watching" (not marking it watched) and, for
+  episodes, "Go to show"; "Mark as watched" stays.
+- **Library grid:** a slim A–Z column on the right to jump to a letter, and sort options at the top
+  (A–Z, Recently added, Year).
+- **Posters** show the title underneath always, not only when focused.
+- **Show page:** moving up or down to another season lands on that season's first episode.
+- **Episode cards** show the air date.
+- **Info in the hold-OK menu:** an "Info" button opens a second popup with year and length (episodes:
+  "S2 · E4 · aired 12 May 2015 · 58m"), video and audio format (with "+N more" tracks), subtitle languages,
+  and file size and name. A short summary, not a full media-info dump. Never a detail page.
+- **Search** remembers the last query and its results until cleared, and shows recent searches as quick
+  picks under the field.
+
+Decided against: more rows on Home, a movie info page (no detail pages is a core goal), Back twice to exit.
+
 ## Bugs
 
 - **Sample 08: the AC3 compatibility track is decoded instead of passed through.** The HDMI output accepts
