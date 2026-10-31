@@ -113,9 +113,9 @@ class MainActivity : ComponentActivity() {
                 is Screen.Grid -> GridScreen(home, s.library, nav)
                 is Screen.Show -> ShowScreen(home, s.show, nav)
                 is Screen.Folder -> FolderScreen(home, s.library, s.key, s.path, nav)
-                Screen.PlexVerse -> PlexVerseScreen(nav)
+                Screen.PlexVerse -> PlexVerseScreen(plex, nav)
                 Screen.Kids -> KidsScreen(nav)
-                Screen.PlexVerseSetup -> PlexVerseSetupScreen(nav)
+                Screen.PlexVerseSetup -> PlexVerseSetupScreen(plex, nav)
             }
         }
     }

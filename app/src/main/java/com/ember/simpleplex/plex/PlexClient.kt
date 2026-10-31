@@ -115,6 +115,12 @@ class PlexClient private constructor(context: Context) {
         throw IOException("Couldn't reach a Plex server on this account")
     }
 
+    /** Keeps the account token of an install signed in before it was kept, once plex.tv accepts it. */
+    suspend fun linkAccount(accountToken: String) {
+        fetchServers(accountToken)
+        this.accountToken = accountToken
+    }
+
     // --- Every server the account can reach ---
 
     /** A server from plex.tv: the account's own or one shared with it, with its own access token. */

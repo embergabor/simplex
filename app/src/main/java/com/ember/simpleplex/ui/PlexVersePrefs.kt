@@ -18,7 +18,8 @@ enum class Category {
     }
 }
 
-data class LibraryChoice(val category: Category, val kids: Boolean = false)
+/** [title] is kept so a server that can't be reached still shows what was chosen for it. */
+data class LibraryChoice(val category: Category, val kids: Boolean = false, val title: String = "")
 
 /**
  * PlexVerse's setup: the servers in the order they're tried, and each library's category, keyed by
@@ -36,12 +37,22 @@ data class VerseSetup(
         servers.filter { it in machineIds } + machineIds.filter { it !in servers }
 
     fun choice(machineId: String, library: Library) =
-        libraries[key(machineId, library.key)] ?: LibraryChoice(Category.default(library.kind))
+        libraries[key(machineId, library.key)] ?: LibraryChoice(Category.default(library.kind), title = library.title)
+
+    /** A server's current libraries: new ones get their default, titles are refreshed, gone ones dropped. */
+    fun withLibraries(machineId: String, current: List<Library>): VerseSetup {
+        val others = libraries.filterKeys { !it.startsWith("$machineId/") }
+        val mine = current.associate { key(machineId, it.key) to choice(machineId, it).copy(title = it.title) }
+        return copy(libraries = others + mine)
+    }
+
+    /** The stored choices of one server, in key order, for when it can't be reached. */
+    fun storedFor(machineId: String) = libraries.filterKeys { it.startsWith("$machineId/") }.toSortedMap().entries.toList()
 
     fun toJson(): String = JSONObject()
         .put("servers", JSONArray(servers))
         .put("libraries", JSONObject().apply {
-            for ((k, c) in libraries) put(k, JSONObject().put("category", c.category.name).put("kids", c.kids))
+            for ((k, c) in libraries) put(k, JSONObject().put("category", c.category.name).put("kids", c.kids).put("title", c.title))
         })
         .put("kidsSeparate", kidsSeparate)
         .toString()
@@ -60,6 +71,7 @@ data class VerseSetup(
                     LibraryChoice(
                         runCatching { Category.valueOf(c.optString("category")) }.getOrDefault(Category.NONE),
                         c.optBoolean("kids"),
+                        c.optString("title"),
                     )
                 },
                 kidsSeparate = o.optBoolean("kidsSeparate"),

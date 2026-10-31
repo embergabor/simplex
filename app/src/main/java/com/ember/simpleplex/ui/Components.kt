@@ -375,9 +375,11 @@ fun PillButton(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     selected: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
 ) {
     Button(
         onClick = onClick,
+        onLongClick = onLongClick,
         modifier = modifier,
         shape = ButtonDefaults.shape(RoundedCornerShape(8.dp)),
         scale = ButtonDefaults.scale(focusedScale = 1.04f),
@@ -486,7 +488,7 @@ fun ItemMenu(plex: PlexServer, item: Item, nav: Nav, favorite: Boolean? = null, 
     }
 }
 
-private val okKeys = setOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)
+internal val okKeys = setOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)
 
 fun formatDuration(ms: Long): String {
     val total = ms / 1000

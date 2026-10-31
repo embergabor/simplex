@@ -72,7 +72,12 @@ sealed interface Screen {
 // --- Sign in ---
 
 @Composable
-fun SignInScreen(plex: PlexClient, onDone: () -> Unit) {
+fun SignInScreen(
+    plex: PlexClient,
+    title: String = "Connect to your Plex server",
+    link: suspend (accountToken: String) -> Unit = plex::connect,
+    onDone: () -> Unit,
+) {
     var code by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
@@ -86,8 +91,8 @@ fun SignInScreen(plex: PlexClient, onDone: () -> Unit) {
                 delay(2000)
                 val accountToken = plex.pinToken(pin.id) ?: continue
                 code = null
-                status = "Finding your server…"
-                plex.connect(accountToken)
+                status = "Finding your servers…"
+                link(accountToken)
                 onDone()
                 break
             }
@@ -104,7 +109,7 @@ fun SignInScreen(plex: PlexClient, onDone: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterVertically),
     ) {
-        Text("Connect to your Plex server", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
+        Text(title, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
         val c = code
         if (c != null) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
