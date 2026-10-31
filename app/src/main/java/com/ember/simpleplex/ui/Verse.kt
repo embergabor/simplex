@@ -39,6 +39,9 @@ fun queueEntry(copies: List<Copy>) = copies.joinToString(",") { it.ref }
  */
 data class VerseEntry(val key: String, val item: Item, val sources: List<Source>)
 
+/** A Continue watching card: the copy to show, and the sources to play it from, in order. */
+data class Continuing(val item: Item, val sources: List<Source>)
+
 object Verse {
     // Ids that mean the same title on every server. Others (local://, the "none" agent) are per server.
     private val shared = Regex("^(plex|imdb|tmdb|tvdb)://")
@@ -82,6 +85,25 @@ object Verse {
     }
 }
 
+/**
+ * The Continue watching row from every server's in-progress items. A movie plays with every copy of
+ * its merged title in [titles]; an episode or video on several servers shows once, from the preferred
+ * server. Newest first.
+ */
+fun Verse.continuing(inProgress: List<Source>, order: List<String>, titles: List<VerseEntry>): List<Continuing> {
+    val rank = order.withIndex().associate { (i, id) -> id to i }
+    val titleOf = HashMap<String, VerseEntry>()
+    for (e in titles) for (s in e.sources) titleOf[s.ref] = e
+    return inProgress
+        .groupBy { s -> titleOf[s.ref]?.key ?: episodeKeys(s.item).firstOrNull { !it.startsWith("episode:") } ?: s.ref }
+        .values
+        .sortedByDescending { group -> group.maxOf { it.item.lastViewedAt } }
+        .map { group ->
+            val first = group.minBy { rank[it.machineId] ?: Int.MAX_VALUE }
+            Continuing(first.item, titleOf[first.ref]?.sources ?: listOf(first))
+        }
+}
+
 sealed interface ServerState {
     data object Waiting : ServerState
     data class Done(val items: Int) : ServerState
@@ -106,6 +128,10 @@ class VerseStore private constructor(context: Context, private val plex: PlexCli
     private val _lists = MutableStateFlow<Map<String, List<Item>>>(emptyMap())
     /** Each library's titles, by "machineId/sectionKey". */
     val lists: StateFlow<Map<String, List<Item>>> = _lists
+
+    private val _continuing = MutableStateFlow<Map<String, List<Item>>>(emptyMap())
+    /** Each server's Continue watching items, by machine id. */
+    val continuing: StateFlow<Map<String, List<Item>>> = _continuing
 
     private val _connected = MutableStateFlow<Map<String, PlexServer>>(emptyMap())
     /** The servers reached so far, for their images. */
@@ -149,9 +175,34 @@ class VerseStore private constructor(context: Context, private val plex: PlexCli
         }
     }
 
+    /** Asks the reached servers again for what's in progress, e.g. after the player closes. */
+    fun refreshContinuing() {
+        for ((id, server) in _connected.value) scope.launch {
+            runCatching { server.continueWatching() }.onSuccess { c -> _continuing.update { it + (id to c) } }
+        }
+    }
+
+    /**
+     * PlexVerse's Continue watching: items from libraries with a category, kids' ones only with [kids]
+     * (when kids are kept separate), merged across servers.
+     */
+    fun continuingRow(kids: Boolean, lists: Map<String, List<Item>>, continuing: Map<String, List<Item>>): List<Continuing> {
+        val setup = prefs.setup
+        val inProgress = continuing.flatMap { (id, items) ->
+            items.filter { item ->
+                val c = item.librarySectionId?.let { setup.libraries[VerseSetup.key(id, it)] }
+                c != null && c.category != Category.NONE && (setup.kidsSeparate && c.kids) == kids
+            }.map { Source(id, it) }
+        }
+        val order = setup.ordered(continuing.keys)
+        return Verse.continuing(inProgress, order, entries(Category.MOVIES, lists, kids))
+    }
+
     private suspend fun fetch(id: String, keys: List<String>): ServerState {
         val server = plex.server(id) ?: return ServerState.Failed("not reachable")
         _connected.update { it + (id to server) }
+        // Extra: if it fails, the lists still count.
+        scope.launch { runCatching { server.continueWatching() }.onSuccess { c -> _continuing.update { it + (id to c) } } }
         val fresh = coroutineScope {
             keys.map { k -> async { k to server.libraryJson(k.substringAfter('/'), episodes = false) } }.awaitAll()
         }

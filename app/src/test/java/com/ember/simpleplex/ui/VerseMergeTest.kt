@@ -92,4 +92,21 @@ class VerseMergeTest {
         )
         assertEquals(setOf(listOf("1", "7"), listOf("2", "8"), listOf("9")), merged.map { e -> e.sources.map { it.item.ratingKey } }.toSet())
     }
+
+    @Test fun continueWatchingMergesAcrossServers() {
+        val upA = item("1", "Up", 2009, listOf("tmdb://14160"), viewOffset = 100, lastViewedAt = 10)
+        val upB = item("2", "Up", 2009, listOf("tmdb://14160"))
+        val titles = Verse.merge(listOf(Source("A", upA), Source("B", upB)), order = listOf("A", "B"))
+        fun ep(key: String, at: Long) = item(key, "Pilot", guids = listOf("plex://episode/p1"), lastViewedAt = at).copy(type = "episode", parentIndex = 1, index = 1)
+        val row = Verse.continuing(
+            inProgress = listOf(Source("A", upA), Source("B", ep("8", 30)), Source("A", ep("7", 20))),
+            order = listOf("A", "B"),
+            titles = titles,
+        )
+        // The episode was watched last, so it's first, from server A (preferred), on its own.
+        assertEquals(listOf("7", "1"), row.map { it.item.ratingKey })
+        assertEquals(listOf("A|7"), row[0].sources.map { it.ref })
+        // The movie plays with every copy of its title.
+        assertEquals(listOf("A|1", "B|2"), row[1].sources.map { it.ref })
+    }
 }

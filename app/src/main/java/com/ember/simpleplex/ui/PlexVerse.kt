@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -90,12 +91,51 @@ fun PlexVerseScreen(plex: PlexClient, nav: Nav) {
     Column(Modifier.fillMaxSize().padding(vertical = 36.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         TopMenu(Screen.PlexVerse, nav)
         UpdatingBar(states)
+        ContinueRow(plex, store, kids = false, nav, memory)
         Row(Modifier.padding(horizontal = 48.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             IconTile(Icons.Film, "Movies", { nav.push(Screen.VerseGrid(Category.MOVIES)) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "movies", default = true))
             IconTile(Icons.Tv, "Series", { nav.push(Screen.VerseGrid(Category.SERIES)) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "series"))
             IconTile(Icons.Folder, "Videos", { nav.push(Screen.VerseVideos) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "videos"))
             IconTile(Icons.Edit, "Customize", { nav.push(Screen.PlexVerseSetup) }, Modifier.size(108.dp, 108.dp).remembersFocus(memory, "customize"))
         }
+    }
+}
+
+/** What's in progress on any server, newest first, like Home's row. Kids get no hold-OK menu. */
+@Composable
+private fun ContinueRow(plex: PlexClient, store: VerseStore, kids: Boolean, nav: Nav, memory: FocusMemory) {
+    LaunchedEffect(LocalRefresh.current) { store.refreshContinuing() }
+    val lists by store.lists.collectAsState()
+    val continuing by store.continuing.collectAsState()
+    val connected by store.connected.collectAsState()
+    val row = remember(lists, continuing) { store.continuingRow(kids, lists, continuing) }
+    var menuFor by remember { mutableStateOf<Continuing?>(null) }
+    if (row.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            items(row, key = { it.sources.first().ref }) { c ->
+                val item = c.item
+                WideCard(
+                    imageUrl = connected[c.sources.first().machineId]?.image(if (item.isEpisode) item.thumb else item.art ?: item.thumb, 480, 270),
+                    title = if (item.isEpisode) item.grandparentTitle ?: item.title else item.title,
+                    subtitle = if (item.isEpisode) "${item.episodeLabel} · ${item.title}" else if (item.viewOffset > 0) timeLeft(item) else null,
+                    progress = item.progress,
+                    watched = false,
+                    onClick = { nav.play(listOf(c.sources.joinToString(",") { it.ref })) },
+                    onLongClick = if (kids) null else ({ menuFor = c }),
+                    width = 200.dp,
+                    modifier = Modifier.remembersFocus(memory, "c" + c.sources.first().ref, default = c == row.first()),
+                )
+            }
+        }
+    }
+    menuFor?.let { c ->
+        val copies = c.sources.mapNotNull { s -> connected[s.machineId]?.let { Copy(it, s.item) } }
+        if (copies.isNotEmpty()) ItemMenu(copies.first().server, c.item, nav, copies = copies, playFrom = true) { menuFor = null }
     }
 }
 
@@ -165,7 +205,12 @@ fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
                     val bleed = 48.dp.roundToPx()
                     val p = m.measure(c.copy(maxWidth = c.maxWidth + 2 * bleed))
                     layout(c.maxWidth, p.height) { p.place(-bleed, 0) }
-                }) { TopMenu(Screen.Kids, nav) }
+                }) {
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        TopMenu(Screen.Kids, nav)
+                        ContinueRow(plex, store, kids = true, nav, memory)
+                    }
+                }
             }
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
