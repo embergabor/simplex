@@ -67,6 +67,7 @@ sealed interface Screen {
     data object PlexVerse : Screen
     data object Kids : Screen
     data object PlexVerseSetup : Screen
+    data class VerseGrid(val category: Category) : Screen
 }
 
 // --- Sign in ---

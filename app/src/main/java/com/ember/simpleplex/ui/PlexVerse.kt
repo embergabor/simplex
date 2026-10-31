@@ -18,11 +18,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,15 +77,104 @@ fun PlexVerseScreen(plex: PlexClient, nav: Nav) {
     var setUp by remember { mutableStateOf(PlexVersePrefs(context).setup.isSetUp) }
     if (!setUp) return PlexVerseSetupScreen(plex, nav, onDone = { setUp = true })
 
+    val store = remember { VerseStore.get(context, plex) }
+    LaunchedEffect(Unit) { store.refresh() }
+    val states by store.servers.collectAsState()
+    // The very first open waits for the servers (or for "Continue"); later ones start from the saved copy.
+    var waiting by remember { mutableStateOf(!store.hasCache()) }
+    val pending = states.values.count { it == ServerState.Waiting }
+    if (waiting && (pending > 0 || states.isEmpty())) return PrefetchPanel(plex, states) { waiting = false }
+
     val memory = rememberFocusMemory()
     Column(Modifier.fillMaxSize().padding(vertical = 36.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         TopMenu(Screen.PlexVerse, nav)
+        UpdatingBar(states)
         Row(Modifier.padding(horizontal = 48.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            // ponytail: categories open nothing until their grids exist (steps 5 and 7).
-            IconTile(Icons.Film, "Movies", {}, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "movies", default = true))
-            IconTile(Icons.Tv, "Series", {}, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "series"))
+            IconTile(Icons.Film, "Movies", { nav.push(Screen.VerseGrid(Category.MOVIES)) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "movies", default = true))
+            IconTile(Icons.Tv, "Series", { nav.push(Screen.VerseGrid(Category.SERIES)) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "series"))
+            // ponytail: Videos opens nothing until step 7.
             IconTile(Icons.Folder, "Videos", {}, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "videos"))
             IconTile(Icons.Edit, "Customize", { nav.push(Screen.PlexVerseSetup) }, Modifier.size(108.dp, 108.dp).remembersFocus(memory, "customize"))
+        }
+    }
+}
+
+/** The first fetch from every server: a bar, then a line per server. */
+@Composable
+private fun PrefetchPanel(plex: PlexClient, states: Map<String, ServerState>, onContinue: () -> Unit) {
+    val names = remember { plex.cachedServers.associate { it.machineId to it.name } }
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 36.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        SectionTitle("Getting the lists from your servers")
+        ServersBar(states.values.count { it != ServerState.Waiting }, states.size.coerceAtLeast(1))
+        for ((id, state) in states) {
+            val line = when (state) {
+                ServerState.Waiting -> "…"
+                is ServerState.Done -> "✓ ${state.items} titles"
+                is ServerState.Failed -> "✗ ${state.reason}"
+            }
+            Text("${names[id] ?: id}   $line", fontSize = 13.sp, color = Palette.Ink)
+        }
+        PillButton("Continue with what's here", onContinue, Modifier.padding(top = 10.dp).remembersFocus(rememberFocusMemory(), "continue", default = true))
+    }
+}
+
+/** "Updating · 3/5 servers" while a refresh runs; nothing otherwise. */
+@Composable
+fun UpdatingBar(states: Map<String, ServerState>, modifier: Modifier = Modifier.padding(horizontal = 48.dp)) {
+    val done = states.values.count { it != ServerState.Waiting }
+    if (done == states.size) return
+    Text("Updating · $done/${states.size} servers", modifier, fontSize = 11.sp, color = Palette.Secondary)
+}
+
+/** One category's titles from every server, merged, A–Z. ×N marks a title that's on N servers. */
+@Composable
+fun VerseGridScreen(plex: PlexClient, category: Category, nav: Nav) {
+    val context = LocalContext.current
+    val store = remember { VerseStore.get(context, plex) }
+    LaunchedEffect(Unit) { store.refresh() }
+    val states by store.servers.collectAsState()
+    val lists by store.lists.collectAsState()
+    val connected by store.connected.collectAsState()
+    val entries = remember(lists) { store.entries(category, lists) }
+    val memory = rememberFocusMemory()
+    val title = if (category == Category.SERIES) "Series" else "Movies"
+    val home = plex.home
+
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(6),
+        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 40.dp),
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(Modifier.padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ScreenTitle(title, "A–Z")
+                UpdatingBar(states, Modifier)
+                if (entries.isEmpty() && states.values.none { it == ServerState.Waiting }) {
+                    Text("Nothing here yet.", fontSize = 13.sp, color = Palette.Secondary)
+                }
+            }
+        }
+        items(entries, key = { it.key }) { entry ->
+            // The poster from the first source whose server has answered.
+            val shown = entry.sources.firstOrNull { it.machineId in connected }
+            // ponytail: only the home server's copy plays until the player knows other servers (step 6).
+            val onHome = entry.sources.firstOrNull { it.machineId == home?.machineId }?.item
+            PosterCard(
+                title = entry.item.title,
+                imageUrl = shown?.let { connected[it.machineId]?.image(it.item.thumb, 248, 372) },
+                progress = entry.item.progress,
+                watched = entry.item.watched,
+                badge = if (entry.sources.size > 1) "×${entry.sources.size}" else null,
+                onClick = {
+                    if (onHome == null) return@PosterCard
+                    if (onHome.type == "show") nav.push(Screen.Show(onHome)) else nav.play(listOf(onHome.ratingKey))
+                },
+                modifier = Modifier.remembersFocus(memory, entry.key, default = entry == entries.first()),
+            )
         }
     }
 }

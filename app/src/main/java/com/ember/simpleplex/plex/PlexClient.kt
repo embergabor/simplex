@@ -137,6 +137,12 @@ class PlexClient private constructor(context: Context) {
         val json = call(request("$PLEX_TV/resources?includeHttps=1&includeRelay=1", accountToken).build())
         val servers = parseResources(json, accountToken)
         prefs.edit().putString("resources", json).apply()
+        // Installs from before the home server's id was kept: it's the one with the same token.
+        val h = home
+        if (h != null && h.machineId == null) servers.find { it.accessToken == h.token }?.let { s ->
+            prefs.edit().putString("machineId", s.machineId).apply()
+            home = PlexServer(h.uri, h.token, s.machineId, this)
+        }
         return servers
     }
 

@@ -28,6 +28,13 @@ data class Item(
     val summary: String? = null,
     /** Plex labels, e.g. [Episodes.FAVORITE]. Not every list from Plex includes them. */
     val labels: List<String> = emptyList(),
+    val year: Int? = null,
+    /** Plex's own guid and the agents' ids (imdb://, tmdb://, tvdb://), for matching across servers. */
+    val guids: List<String> = emptyList(),
+    /** When it was last watched, in seconds; 0 if never. */
+    val lastViewedAt: Long = 0,
+    /** The title to sort by, e.g. without "The"; null when it's the title itself. */
+    val titleSort: String? = null,
 ) {
     val isEpisode get() = type == "episode"
 
@@ -161,6 +168,10 @@ internal fun parseItem(o: JSONObject) = Item(
     librarySectionId = o.str("librarySectionID"),
     summary = o.str("summary"),
     labels = o.optJSONArray("Label").objects().mapNotNull { it.str("tag") },
+    year = o.int("year"),
+    guids = listOfNotNull(o.str("guid")) + o.optJSONArray("Guid").objects().mapNotNull { it.str("id") },
+    lastViewedAt = o.long("lastViewedAt") ?: 0,
+    titleSort = o.str("titleSort"),
     media = o.optJSONArray("Media").objects().map { m ->
         Media(
             parts = m.optJSONArray("Part").objects().map { p ->

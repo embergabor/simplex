@@ -37,14 +37,14 @@ class PlexServer(val uri: String, val token: String, val machineId: String?, pri
         Library(d.str("key") ?: return@mapNotNull null, d.str("title") ?: "", kind)
     }
 
-    suspend fun libraryItems(sectionKey: String) = get("/library/sections/$sectionKey/all?sort=titleSort").items()
+    suspend fun libraryItems(sectionKey: String) = get("/library/sections/$sectionKey/all?sort=titleSort&includeGuids=1").items()
 
     /**
      * A library's list as Plex's raw JSON, for search to keep a copy on the TV: its titles, or with
      * [episodes] every episode of a TV library (with descriptions). Read back with [parseItems].
      */
     suspend fun libraryJson(sectionKey: String, episodes: Boolean): String {
-        val path = "/library/sections/$sectionKey/all?" + if (episodes) "type=4" else "sort=titleSort"
+        val path = "/library/sections/$sectionKey/all?" + if (episodes) "type=4" else "sort=titleSort&includeGuids=1"
         return client.call(client.request(uri + path, token).build())
     }
 

@@ -34,6 +34,7 @@ import com.ember.simpleplex.ui.PlexVerseSetupScreen
 import com.ember.simpleplex.ui.Screen
 import com.ember.simpleplex.ui.SearchScreen
 import com.ember.simpleplex.ui.ShowScreen
+import com.ember.simpleplex.ui.VerseGridScreen
 import com.ember.simpleplex.ui.SignInScreen
 
 private val TOP = setOf(Screen.Home, Screen.PlexVerse, Screen.Kids)
@@ -116,6 +117,7 @@ class MainActivity : ComponentActivity() {
                 Screen.PlexVerse -> PlexVerseScreen(plex, nav)
                 Screen.Kids -> KidsScreen(nav)
                 Screen.PlexVerseSetup -> PlexVerseSetupScreen(plex, nav)
+                is Screen.VerseGrid -> VerseGridScreen(plex, s.category, nav)
             }
         }
     }
