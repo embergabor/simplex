@@ -30,6 +30,7 @@ import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.util.EventLogger
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import com.ember.simpleplex.plex.Episodes
 import com.ember.simpleplex.plex.Item
@@ -122,6 +123,8 @@ class PlayerActivity : ComponentActivity() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(this).setSubtitleParserFactory(SubtitleParsers()))
             .build()
         player.addListener(listener)
+        // Debug builds log ExoPlayer's track mapping, renderer support and decoders (logcat tag EventLogger).
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) player.addAnalyticsListener(EventLogger())
         player.addAnalyticsListener(object : AnalyticsListener {
             override fun onAudioInputFormatChanged(
                 eventTime: AnalyticsListener.EventTime,
