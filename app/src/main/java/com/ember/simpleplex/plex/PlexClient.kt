@@ -204,9 +204,9 @@ class PlexClient private constructor(context: Context) {
         if (saved != on) throw IOException("Plex didn't keep the change")
     }
 
-    /** Full metadata including streams, needed before playback. */
+    /** Full metadata including streams and intro/credits markers, needed before playback. */
     suspend fun metadata(ratingKey: String): Item {
-        val mc = get("/library/metadata/$ratingKey")
+        val mc = get("/library/metadata/$ratingKey?includeMarkers=1")
         val item = mc.items().first()
         return if (item.librarySectionId == null) item.copy(librarySectionId = mc.str("librarySectionID")) else item
     }
@@ -254,6 +254,10 @@ class PlexClient private constructor(context: Context) {
 
     suspend fun timeline(ratingKey: String, state: String, timeMs: Long, durationMs: Long) =
         send("/:/timeline?ratingKey=$ratingKey&key=%2Flibrary%2Fmetadata%2F$ratingKey&state=$state&time=$timeMs&duration=$durationMs&identifier=com.plexapp.plugins.library")
+
+    /** Takes an item off Continue watching without marking it watched (until it's played again). */
+    suspend fun removeFromContinueWatching(ratingKey: String) =
+        send("/actions/removeFromContinueWatching?ratingKey=$ratingKey", "PUT")
 
     suspend fun setWatched(ratingKey: String, watched: Boolean) =
         send("/:/${if (watched) "scrobble" else "unscrobble"}?identifier=com.plexapp.plugins.library&key=$ratingKey")

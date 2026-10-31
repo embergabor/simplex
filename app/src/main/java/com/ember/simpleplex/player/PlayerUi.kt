@@ -4,11 +4,20 @@ package com.ember.simpleplex.player
 
 import android.view.ViewGroup
 import androidx.annotation.OptIn as AndroidXOptIn
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -74,6 +83,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import com.ember.simpleplex.plex.Item
+import com.ember.simpleplex.plex.Marker
 import com.ember.simpleplex.plex.Stream
 import com.ember.simpleplex.ui.Icons
 import com.ember.simpleplex.ui.Palette
@@ -81,8 +91,6 @@ import com.ember.simpleplex.ui.IconPillButton
 import com.ember.simpleplex.ui.PillButton
 import com.ember.simpleplex.ui.formatDuration
 import kotlinx.coroutines.delay
-
-private fun Stream.shortName() = displayTitle.substringBefore(" (")
 
 private fun Player.togglePlay() = if (isPlaying) pause() else play()
 
@@ -112,10 +120,13 @@ fun PlayerScreen(
     /** Compatibility track or Plex converting; answered with true for the compatibility track. */
     question: AudioQuestion?,
     onAnswer: (Boolean) -> Unit,
+    /** Waiting on Plex (the video's details, a conversion starting) before the player has anything to load. */
+    preparing: Boolean,
 ) {
     var visible by remember { mutableStateOf(true) }
     var lastInput by remember { mutableLongStateOf(0L) }
     var isPlaying by remember { mutableStateOf(player.isPlaying) }
+    var buffering by remember { mutableStateOf(player.playbackState == Player.STATE_BUFFERING) }
     var picker by remember { mutableStateOf<Int?>(null) } // 2 = audio, 3 = subtitles
     val root = remember { FocusRequester() }
     val scrub = remember { FocusRequester() }
@@ -123,6 +134,7 @@ fun PlayerScreen(
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onPlaybackStateChanged(state: Int) { buffering = state == Player.STATE_BUFFERING }
         }
         player.addListener(listener)
         onDispose { player.removeListener(listener) }
@@ -138,6 +150,20 @@ fun PlayerScreen(
         withFrameNanos { }
         runCatching { if (visible && item != null) scrub.requestFocus() else root.requestFocus() }
     }
+    // Intro and end-credits buttons, from Plex's markers: shown while the controls are hidden, OK presses them.
+    var marker by remember(item) { mutableStateOf<Marker?>(null) }
+    LaunchedEffect(item) {
+        if (item == null || item.markers.isEmpty()) return@LaunchedEffect
+        while (true) {
+            marker = Markers.active(item, position())
+            delay(500)
+        }
+    }
+    // The end credits skip to the next episode; without one there's nothing to skip to.
+    val markerAction: (() -> Unit)? = marker?.let { m ->
+        if (m.isIntro) ({ seekTo(m.end) }) else onNext
+    }
+
     // Scrubbing: left/right move a preview playhead while the video keeps playing; OK jumps there.
     // Controls hiding (Back, or 5 s without a key) cancels it.
     var scrubAt by remember { mutableStateOf<Long?>(null) }
@@ -207,8 +233,9 @@ fun PlayerScreen(
         val pick = subtitleEntries.getOrNull(i)
         if (pick?.id != subtitle?.id) onSubtitle(pick)
     }
+    // Long enough to see the switch take effect (a Plex conversion takes a few seconds to start).
     LaunchedEffect(trackBoxShownAt) {
-        delay(4000)
+        delay(6000)
         trackBox = null
     }
 
@@ -241,7 +268,12 @@ fun PlayerScreen(
                     Key.MediaNext -> { onNext?.invoke(); true }
                     Key.MediaPrevious -> { onPrevious?.invoke(); true }
                     else -> if (visible) false else {
-                        // Hidden controls: left/right start scrubbing, anything else (OK too) just shows the controls.
+                        // Hidden controls: OK presses a skip button that's showing.
+                        if (e.key in okKeys && markerAction != null && e.nativeKeyEvent.repeatCount == 0) {
+                            markerAction()
+                            return@onPreviewKeyEvent true
+                        }
+                        // Left/right start scrubbing, anything else (OK too) just shows the controls.
                         when (e.key) {
                             Key.DirectionLeft -> scrub(e.nativeKeyEvent, -1)
                             Key.DirectionRight -> scrub(e.nativeKeyEvent, 1)
@@ -292,12 +324,29 @@ fun PlayerScreen(
                 Text(error, fontSize = 16.sp, color = Color.White, textAlign = TextAlign.Center)
                 Text("Press Back to return", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
             }
-        } else {
-            // The track box takes the info box's corner while it's up.
-            trackBox?.let { TrackBox(it, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp)) }
+        } else if (trackBox != null && !(visible && item != null)) {
+            // The audio/subtitle buttons show just the info box, with the track they stepped to.
+            InfoBox(info, trackBox, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
+        }
+        // Only after half a second, so quick waits don't flash it.
+        var spinner by remember { mutableStateOf(false) }
+        val waiting = error == null && question == null && (preparing || buffering)
+        LaunchedEffect(waiting) {
+            spinner = false
+            if (waiting) {
+                delay(500)
+                spinner = true
+            }
+        }
+        if (spinner) Spinner(Modifier.align(Alignment.Center))
+        if (error == null && !visible && markerAction != null) {
+            SkipButton(
+                if (marker?.isIntro == true) "Skip intro" else "Next episode",
+                Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = 48.dp),
+            )
         }
         if (error == null && visible && item != null) {
-            if (trackBox == null) InfoBox(info, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
+            InfoBox(info, trackBox, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
             Controls(
                 item, duration, audio, subtitle, isPlaying, position, scrubAt, previews, scrub,
                 onPrevious, onNext, onTogglePlay = { player.togglePlay() },
@@ -307,9 +356,9 @@ fun PlayerScreen(
                     when (e.key) {
                         Key.DirectionLeft -> { scrub(e.nativeKeyEvent, -1); true }
                         Key.DirectionRight -> { scrub(e.nativeKeyEvent, 1); true }
-                        // OK jumps to the scrub position or resumes; pausing is the remote's play/pause button.
+                        // OK jumps to the scrub position, otherwise pauses or resumes.
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                            if (scrubAt != null) commitScrub() else if (!player.isPlaying) player.play()
+                            if (scrubAt != null) commitScrub() else player.togglePlay()
                             true
                         }
                         else -> false
@@ -375,8 +424,8 @@ private fun Controls(
                 Text(item.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, maxLines = 1)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PillButton("Subtitles: ${subtitle?.shortName() ?: "Off"}", { onPick(3) }, icon = Icons.Subtitles)
-                PillButton("Audio: ${audio?.shortName() ?: "—"}", { onPick(2) }, icon = Icons.Audio)
+                PillButton("Subtitles: ${subtitle?.let(Describe::trackLabel) ?: "Off"}", { onPick(3) }, icon = Icons.Subtitles)
+                PillButton("Audio: ${audio?.let(Describe::trackLabel) ?: "—"}", { onPick(2) }, icon = Icons.Audio)
             }
         }
         BoxWithConstraints(
@@ -438,11 +487,47 @@ private fun Controls(
     }
 }
 
-/** Small technical readout in the top-left corner, shown only together with the controls. */
+private val okKeys = setOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)
+
+/** Looks like a focused button; OK presses it (handled with the player's keys, so it never takes focus). */
 @Composable
-private fun InfoBox(info: PlaybackInfo, modifier: Modifier) {
+private fun SkipButton(label: String, modifier: Modifier) {
+    Row(
+        modifier
+            .background(Palette.Ink, RoundedCornerShape(8.dp))
+            .border(2.dp, Color.White, RoundedCornerShape(8.dp))
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+        Text("OK", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.7f),
+            modifier = Modifier.border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp))
+    }
+}
+
+/** A ring with a turning arc, for loading and buffering. */
+@Composable
+private fun Spinner(modifier: Modifier) {
+    val turn = rememberInfiniteTransition(label = "spinner")
+    val angle by turn.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "angle")
+    Canvas(modifier.size(44.dp).background(Color(0x991C1C1E), CircleShape).padding(10.dp)) {
+        val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+        drawArc(Color.White.copy(alpha = 0.25f), 0f, 360f, useCenter = false, style = stroke)
+        drawArc(Color.White, angle, 90f, useCenter = false, style = stroke)
+    }
+}
+
+/**
+ * Small technical readout in the top-left corner: what's playing and how (direct, or Plex converting),
+ * live. With the controls, or alone when the remote's audio/subtitle button steps to [track], whose
+ * details follow underneath.
+ */
+@Composable
+private fun InfoBox(info: PlaybackInfo, track: TrackInfo?, modifier: Modifier) {
     Column(
         modifier
+            .width(IntrinsicSize.Max)
             .background(Color(0xCC3A3A3E), RoundedCornerShape(8.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -450,27 +535,18 @@ private fun InfoBox(info: PlaybackInfo, modifier: Modifier) {
         InfoLine("Video", info.video)
         InfoLine("Audio", info.audio)
         InfoLine("Subs", info.subtitle)
-        Markers(info.markers)
-    }
-}
-
-/** Details of the track the remote's audio or subtitle button just switched to; styled like [InfoBox]. */
-@Composable
-private fun TrackBox(info: TrackInfo, modifier: Modifier) {
-    Column(
-        modifier
-            .background(Color(0xCC3A3A3E), RoundedCornerShape(8.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        Text(info.heading, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-        info.lines.forEach { (label, value) -> InfoLine(label, value) }
-        if (info.markers.isNotEmpty()) Markers(info.markers)
+        Tags(info.markers)
+        if (track != null) {
+            Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.25f)))
+            Text(track.heading, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+            track.lines.forEach { (label, value) -> InfoLine(label, value) }
+            if (track.markers.isNotEmpty()) Tags(track.markers)
+        }
     }
 }
 
 @Composable
-private fun Markers(markers: List<String>) {
+private fun Tags(markers: List<String>) {
     Row(Modifier.padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
         markers.forEach {
             Text(
@@ -562,7 +638,7 @@ private fun TrackPicker(
                 items(entries) { s ->
                     val selected = s?.id == current?.id
                     PillButton(
-                        label = s?.displayTitle ?: "Off",
+                        label = s?.let(Describe::trackLabel) ?: "Off",
                         selected = selected,
                         onClick = { onPick(s); onDismiss() },
                         modifier = Modifier.fillMaxWidth().then(if (selected) Modifier.focusRequester(focus) else Modifier),

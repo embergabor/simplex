@@ -165,7 +165,8 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                             subtitle = if (item.isEpisode) "${item.episodeLabel} · ${item.title}" else if (item.viewOffset > 0) timeLeft(item) else null,
                             progress = item.progress,
                             watched = false,
-                            onClick = { nav.play(listOf(item.ratingKey)) },
+                            // The one place, with the show page's Play, that continues where it was left.
+                            onClick = { nav.play(listOf(item.ratingKey), resume = true) },
                             onLongClick = { menuFor = item },
                             width = 200.dp,
                             modifier = Modifier.remembersFocus(memory, "c" + item.ratingKey, default = item == continuing.first()),
@@ -210,7 +211,7 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
             }
         }
     }
-    menuFor?.let { ItemMenu(plex, it, nav) { menuFor = null } }
+    menuFor?.let { ItemMenu(plex, it, nav, continueWatching = true) { menuFor = null } }
     if (editing) {
         LibraryEditor(allLibraries, hidden, onToggle = { key ->
             hidden = if (key in hidden) hidden - key else hidden + key
@@ -304,7 +305,7 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
 
     val next = Episodes.nextUp(episodes)
     val seasons = episodes.groupBy { it.parentIndex ?: 0 }.entries.toList()
-    val playFrom: (Int) -> Unit = { i -> nav.play(episodes.drop(i).map { it.ratingKey }) }
+    val playFrom = { i: Int, resume: Boolean -> nav.play(episodes.drop(i).map { it.ratingKey }, resume = resume) }
 
     LazyColumn(contentPadding = PaddingValues(vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item(key = "header") {
@@ -325,20 +326,20 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
                         PillButton(
                             label = "Play ${episodes[next].episodeLabel}",
                             icon = Icons.Play,
-                            onClick = { playFrom(next) },
+                            onClick = { playFrom(next, true) },
                             modifier = Modifier.remembersFocus(memory, "play", default = true),
                         )
                         PillButton(
                             label = "Shuffle",
                             icon = Icons.Shuffle,
-                            onClick = { nav.play(episodes.shuffled().map { it.ratingKey }, fromStart = true, shuffle = true) },
+                            onClick = { nav.play(episodes.shuffled().map { it.ratingKey }, shuffle = true) },
                             modifier = Modifier.remembersFocus(memory, "shuffle"),
                         )
                         if (favorites.isNotEmpty()) {
                             PillButton(
                                 label = "Shuffle favorites",
                                 icon = Icons.Shuffle,
-                                onClick = { nav.play(favorites.shuffled().map { it.ratingKey }, fromStart = true, shuffle = true) },
+                                onClick = { nav.play(favorites.shuffled().map { it.ratingKey }, shuffle = true) },
                                 modifier = Modifier.remembersFocus(memory, "shuffleFavorites"),
                             )
                         }
@@ -392,7 +393,7 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
                                 subtitleFirst = true,
                                 progress = ep.progress,
                                 watched = ep.watched,
-                                onClick = { playFrom(episodes.indexOf(ep)) },
+                                onClick = { playFrom(episodes.indexOf(ep), false) },
                                 onLongClick = { menuFor = ep },
                                 width = 176.dp,
                                 modifier = Modifier.remembersFocus(memory, ep.ratingKey),

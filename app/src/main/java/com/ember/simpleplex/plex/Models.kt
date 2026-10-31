@@ -28,6 +28,13 @@ data class Item(
     val summary: String? = null,
     /** Plex labels, e.g. [Episodes.FAVORITE]. Not every list from Plex includes them. */
     val labels: List<String> = emptyList(),
+    val year: Int? = null,
+    /** "2015-05-12": an episode's air date, a movie's release date. */
+    val airDate: String? = null,
+    /** When it was added to the library, in seconds since 1970. */
+    val addedAt: Long = 0,
+    /** Plex's intro and credits markers; only in full metadata. */
+    val markers: List<Marker> = emptyList(),
 ) {
     val isEpisode get() = type == "episode"
 
@@ -46,12 +53,22 @@ data class Item(
 
 data class Media(val parts: List<Part>)
 
+/** [type] "intro" or "credits"; [final]: the credits that run to the end. Times in ms. */
+data class Marker(val type: String, val start: Long, val end: Long, val final: Boolean = false) {
+    val isIntro get() = type == "intro"
+    val isCredits get() = type == "credits"
+}
+
 data class Part(
     val id: Long,
     val key: String,
     val streams: List<Stream>,
     /** Plex generated video preview thumbnails for this file. */
     val previews: Boolean,
+    /** The file's path on the server. */
+    val file: String? = null,
+    /** Bytes. */
+    val size: Long? = null,
 )
 
 data class Stream(
@@ -161,6 +178,12 @@ internal fun parseItem(o: JSONObject) = Item(
     librarySectionId = o.str("librarySectionID"),
     summary = o.str("summary"),
     labels = o.optJSONArray("Label").objects().mapNotNull { it.str("tag") },
+    year = o.int("year"),
+    airDate = o.str("originallyAvailableAt"),
+    addedAt = o.long("addedAt") ?: 0,
+    markers = o.optJSONArray("Marker").objects().mapNotNull { m ->
+        Marker(m.str("type") ?: return@mapNotNull null, m.long("startTimeOffset") ?: return@mapNotNull null, m.long("endTimeOffset") ?: return@mapNotNull null, m.bool("final"))
+    },
     media = o.optJSONArray("Media").objects().map { m ->
         Media(
             parts = m.optJSONArray("Part").objects().map { p ->
@@ -169,6 +192,8 @@ internal fun parseItem(o: JSONObject) = Item(
                     key = p.str("key") ?: "",
                     streams = p.optJSONArray("Stream").objects().map(::parseStream),
                     previews = p.str("indexes")?.contains("sd") == true,
+                    file = p.str("file"),
+                    size = p.long("size"),
                 )
             },
         )

@@ -60,7 +60,8 @@ class PlayerActivity : ComponentActivity() {
 
     private val queue = mutableListOf<String>()
     private var index = 0
-    private var fromStart = false
+    /** Whether the first video continues where it was left; every other one starts from the beginning. */
+    private var resume = false
     private var shuffle = false
     /** Whether the queue was widened to the show's whole episode list (ordered play only). */
     private var wholeShow = false
@@ -84,6 +85,8 @@ class PlayerActivity : ComponentActivity() {
     private val subtitle = mutableStateOf<Stream?>(null)
     private val error = mutableStateOf<String?>(null)
     private val previews = mutableStateOf<PreviewThumbs?>(null)
+    /** Waiting on Plex before the player has anything to load; shows the spinner. */
+    private val preparing = mutableStateOf(false)
 
     /** Compatibility track or Plex converting, while it's being asked. */
     private val question = mutableStateOf<AudioQuestion?>(null)
@@ -103,7 +106,7 @@ class PlayerActivity : ComponentActivity() {
         // What the TV accepts as a bitstream on its current output (here: eARC to the receiver).
         caps = AudioCapabilities.getCapabilities(this, AudioAttributes.DEFAULT, null)
         queue += intent.getStringArrayListExtra(EXTRA_KEYS).orEmpty()
-        fromStart = intent.getBooleanExtra(EXTRA_FROM_START, false)
+        resume = intent.getBooleanExtra(EXTRA_RESUME, false)
         shuffle = intent.getBooleanExtra(EXTRA_SHUFFLE, false)
         keepQueue = intent.getBooleanExtra(EXTRA_KEEP_QUEUE, false)
         index = intent.getIntExtra(EXTRA_START_AT, 0).coerceIn(0, (queue.size - 1).coerceAtLeast(0))
@@ -171,6 +174,7 @@ class PlayerActivity : ComponentActivity() {
                     onExit = ::finish,
                     question = question.value,
                     onAnswer = { useCompat -> answer?.invoke(useCompat) },
+                    preparing = preparing.value,
                 )
             }
         }
@@ -241,6 +245,7 @@ class PlayerActivity : ComponentActivity() {
             // A question still open was about the previous video.
             question.value = null
             answer = null
+            preparing.value = true
             val item = try {
                 plex.metadata(key)
             } catch (e: CancellationException) {
@@ -248,6 +253,8 @@ class PlayerActivity : ComponentActivity() {
             } catch (e: Exception) {
                 error.value = "Couldn't load this video.\n${e.message}"
                 return@launch
+            } finally {
+                preparing.value = false
             }
             val part = item.part ?: run {
                 error.value = "Plex has no file for “${item.title}”."
@@ -265,7 +272,8 @@ class PlayerActivity : ComponentActivity() {
             val plan = PlexTracks.planAudio(part, chosen, caps::supportsEncoding)
             subtitle.value = PlexTracks.subtitleStreams(part).firstOrNull { it.selected }
 
-            val start = if (fromStart) 0L else item.viewOffset
+            val start = if (resume) item.viewOffset else 0L
+            resume = false
             val direct = { s: Stream? -> audio.value = s; playDirect(item, part, start) }
             val convert = { audio.value = plan.stream; playConverted(start) }
             when (plan.choice) {
@@ -412,6 +420,7 @@ class PlayerActivity : ComponentActivity() {
         val part = item.part ?: return
         lifecycleScope.launch {
             player.pause()
+            preparing.value = true
             val stream = try {
                 plex.convertedStream(item.ratingKey, offset, keepSubtitle = subtitle.value != null)
             } catch (e: CancellationException) {
@@ -420,6 +429,8 @@ class PlayerActivity : ComponentActivity() {
                 player.stop()
                 error.value = "This file's audio can't be played on this TV, and Plex couldn't convert it.\n${e.message}"
                 return@launch
+            } finally {
+                preparing.value = false
             }
             timeBase = offset
             converted = true
@@ -524,7 +535,7 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_KEYS = "keys"
-        const val EXTRA_FROM_START = "fromStart"
+        const val EXTRA_RESUME = "resume"
         const val EXTRA_SHUFFLE = "shuffle"
         const val EXTRA_START_AT = "startAt"
         const val EXTRA_KEEP_QUEUE = "keepQueue"

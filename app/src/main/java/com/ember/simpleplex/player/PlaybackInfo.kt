@@ -67,7 +67,36 @@ object Describe {
         ),
     )
 
-    private fun language(s: Stream) = s.language ?: s.languageCode ?: "Unknown"
+    /** The language in English ("Japanese"), from the ISO code when there is one, else Plex's name. */
+    fun language(s: Stream): String {
+        val fromCode = s.languageCode?.let { java.util.Locale.forLanguageTag(it).getDisplayLanguage(java.util.Locale.ENGLISH) }
+        return fromCode?.takeIf { it.isNotBlank() && !it.equals(s.languageCode, ignoreCase = true) }
+            ?: s.language ?: s.languageCode ?: "Unknown"
+    }
+
+    /**
+     * A track's own title when it says something the language and format don't ("Commentary", "SDH"):
+     * titles that only repeat codec, channels or bitrate ("DTS-HD Master Audio / 2.0 / 48 kHz", "Surround
+     * 5.1", "Magyar AC3 2.0 192 kbps") are left out.
+     */
+    fun ownTitle(s: Stream): String? {
+        val t = s.title?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val technical = Regex(
+            "\\d\\.\\d|kbps|khz|\\b(ac-?3|e-?ac-?3|dts|truehd|dolby|aac|flac|pcm|lpcm|atmos|opus|mp3|stereo|mono|surround|" +
+                "pgs|srt|ass|vobsub|subrip|compat)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        if (technical.containsMatchIn(t)) return null
+        if (t.equals(language(s), ignoreCase = true) || t.equals(s.language, ignoreCase = true)) return null
+        return t
+    }
+
+    /** The label on the player's Audio and Subtitles buttons: "Japanese · DTS-HD MA Stereo", "English · PGS". */
+    fun trackLabel(s: Stream): String {
+        val format = if (s.streamType == 3) subtitleCodec(s.codec) else audioFormat(s)
+        return listOfNotNull(language(s), format, ownTitle(s), "Forced".takeIf { s.streamType == 3 && s.forced })
+            .joinToString(" · ")
+    }
 
     fun audioFormat(s: Stream): String {
         val atmos = if (s.displayTitle.contains("Atmos", ignoreCase = true)) " Atmos" else ""
