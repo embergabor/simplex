@@ -157,7 +157,7 @@ private fun InfoPopup(plex: PlexClient, item: Item, onDismiss: () -> Unit) {
             ItemInfo.lines(full).forEach { (label, value) ->
                 Row(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(label, modifier = Modifier.width(64.dp), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Palette.Secondary)
-                    Text(value, fontSize = 11.sp, color = Palette.Ink)
+                    Text(value, modifier = Modifier.weight(1f), fontSize = 11.sp, color = Palette.Ink)
                 }
             }
             PillButton("Close", onDismiss, Modifier.padding(top = 6.dp).focusRequester(close))
@@ -177,14 +177,12 @@ object ItemInfo {
         val streams = part?.streams.orEmpty()
         val audio = PlexTracks.audioStreams(part ?: return listOf("When" to whenLine(item)))
         val subtitles = PlexTracks.subtitleStreams(part)
-        val mainAudio = audio.firstOrNull { it.selected } ?: audio.firstOrNull()
         return listOfNotNull(
             "When" to whenLine(item),
             streams.firstOrNull { it.streamType == 1 }?.let { "Video" to Describe.video(it) },
-            mainAudio?.let { "Audio" to Describe.trackLabel(it) + more(audio.size - 1) },
-            "Subtitles" to (subtitles.map(Describe::language).distinct().let { langs ->
-                if (langs.isEmpty()) "None" else langs.take(3).joinToString(", ") + more(langs.size - 3)
-            }),
+            // Every audio track on its own line; every subtitle language, wrapping as needed.
+            audio.takeIf { it.isNotEmpty() }?.let { "Audio" to it.joinToString("\n", transform = Describe::trackLabel) },
+            "Subtitles" to (subtitles.map(Describe::language).distinct().joinToString(", ").ifEmpty { "None" }),
             part.file?.let { file ->
                 "File" to listOfNotNull(part.size?.let(::size), file.substringAfterLast('/')).joinToString(" · ")
             },
@@ -197,8 +195,6 @@ object ItemInfo {
         if (item.isEpisode) item.airDate?.let(::date)?.let { "aired $it" } else item.year?.toString(),
         item.duration.takeIf { it > 0 }?.let(::length),
     ).joinToString(" · ")
-
-    private fun more(n: Int) = if (n > 0) " + $n more" else ""
 
     /** "12 May 2015" from Plex's "2015-05-12". */
     fun date(iso: String) = runCatching {

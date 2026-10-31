@@ -22,6 +22,10 @@ Screens:
 - Search keeps the last search until cleared, with recent searches as quick picks.
 - Settings (Home's tile, was Edit): libraries on Home, clear caches, sign out, build info.
 
+- Settings → Wake server: the server's MAC address typed in (separators optional), with "Wake now". With
+  one saved, the "couldn't reach" screens get a focused "Wake server" button. Not tried on a sleeping server.
+- Info popup lists every audio track (one per line) and every subtitle language, no "+ N more".
+
 Updates:
 - Release key in `~/.simplex-release` (back it up: without it no release can update the TV). Versions are
   0.2.<commit count>. `tools/release.sh` builds, checks the signature and publishes a GitHub release.
@@ -30,8 +34,6 @@ Updates:
 
 ## Open
 
-- **"Wake server" button** on the retry screen: where the server's MAC address comes from (Plex doesn't
-  report it): built in, or typed in Settings.
 - **Sample 08: the AC3 compatibility track is decoded instead of passed through.** The HDMI output accepts
   AC3 and sample 01 (AC3 only) passes through; here ExoPlayer gave the AC3 track to the FFmpeg decoder. The
   file's default track is TrueHD, likely related. Debug builds log track mapping (logcat tag EventLogger):

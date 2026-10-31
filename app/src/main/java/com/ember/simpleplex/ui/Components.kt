@@ -40,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
@@ -73,6 +74,7 @@ import coil3.compose.AsyncImage
 import com.ember.simpleplex.plex.Episodes
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.PlexClient
+import com.ember.simpleplex.plex.WakeOnLan
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -165,6 +167,10 @@ fun Message(text: String) {
 fun ErrorMessage(text: String, modifier: Modifier = Modifier.fillMaxSize()) {
     val retry = LocalRefreshBump.current
     val button = remember { FocusRequester() }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val mac = remember { WakeOnLan.Prefs(context).mac }
+    var woken by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         withFrameNanos { }
         runCatching { button.requestFocus() }
@@ -179,8 +185,19 @@ fun ErrorMessage(text: String, modifier: Modifier = Modifier.fillMaxSize()) {
         verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
     ) {
         Text(text, fontSize = 15.sp, color = Palette.Secondary, textAlign = TextAlign.Center)
-        Text("Trying again every few seconds.", fontSize = 12.sp, color = Palette.Secondary)
-        PillButton("Try again now", retry, Modifier.focusRequester(button))
+        Text(woken ?: "Trying again every few seconds.", fontSize = 12.sp, color = Palette.Secondary)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // With a MAC address saved in Settings, waking is the likely fix, so it gets the focus.
+            if (mac != null) {
+                PillButton("Wake server", {
+                    scope.launch {
+                        woken = runCatching { WakeOnLan.send(mac, PlexClient.get(context).serverUri) }
+                            .fold({ "Wake sent. Trying again every few seconds while it starts." }, { "Couldn't send the wake: ${it.message}" })
+                    }
+                }, Modifier.focusRequester(button))
+            }
+            PillButton("Try again now", retry, if (mac == null) Modifier.focusRequester(button) else Modifier)
+        }
     }
 }
 
