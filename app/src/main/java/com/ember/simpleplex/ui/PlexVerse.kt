@@ -41,6 +41,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -129,26 +130,45 @@ fun UpdatingBar(states: Map<String, ServerState>, modifier: Modifier = Modifier.
     Text("Updating · $done/${states.size} servers", modifier, fontSize = 11.sp, color = Palette.Secondary)
 }
 
-/** One category's titles from every server, merged, A–Z. ×N marks a title that's on N servers. */
+/**
+ * One category's titles from every server, merged, A–Z. ×N marks a title that's on N servers.
+ * Without a [category] it's the Kids grid: kids' movies and series mixed, bigger posters, series
+ * marked with a TV, and no hold-OK menu.
+ */
 @Composable
-fun VerseGridScreen(plex: PlexClient, category: Category, nav: Nav) {
+fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
     val context = LocalContext.current
     val store = remember { VerseStore.get(context, plex) }
     LaunchedEffect(Unit) { store.refresh() }
     val states by store.servers.collectAsState()
     val lists by store.lists.collectAsState()
     val connected by store.connected.collectAsState()
-    val entries = remember(lists) { store.entries(category, lists) }
+    val kids = category == null
+    val entries = remember(lists) { if (category == null) store.kidsEntries(lists) else store.entries(category, lists) }
     val memory = rememberFocusMemory()
-    val title = if (category == Category.SERIES) "Series" else "Movies"
+    val title = when (category) {
+        null -> "Kids"
+        Category.SERIES -> "Series"
+        else -> "Movies"
+    }
     var menuFor by remember { mutableStateOf<VerseEntry?>(null) }
 
     LazyVerticalGrid(
-        columns = GridCells.Fixed(6),
-        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 40.dp),
+        columns = GridCells.Fixed(if (kids) 5 else 6),
+        contentPadding = PaddingValues(horizontal = 48.dp, vertical = if (kids) 36.dp else 40.dp),
         horizontalArrangement = Arrangement.spacedBy(24.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
+        if (kids) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                // The grid has its own side margins, so the menu goes without the extra ones.
+                Box(Modifier.layout { m, c ->
+                    val bleed = 48.dp.roundToPx()
+                    val p = m.measure(c.copy(maxWidth = c.maxWidth + 2 * bleed))
+                    layout(c.maxWidth, p.height) { p.place(-bleed, 0) }
+                }) { TopMenu(Screen.Kids, nav) }
+            }
+        }
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column(Modifier.padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ScreenTitle(title, "A–Z")
@@ -167,12 +187,13 @@ fun VerseGridScreen(plex: PlexClient, category: Category, nav: Nav) {
                 progress = entry.item.progress,
                 watched = entry.item.watched,
                 badge = if (entry.sources.size > 1) "×${entry.sources.size}" else null,
+                cornerIcon = if (kids && entry.item.type == "show") Icons.Tv else null,
                 onClick = {
                     if (entry.item.type == "show") nav.push(Screen.Show(entry.item, entry.sources))
                     else nav.play(listOf(entry.sources.joinToString(",") { it.ref }))
                 },
                 // The menu acts on the copies on servers that answered, so it needs one.
-                onLongClick = { if (entry.sources.any { it.machineId in connected }) menuFor = entry },
+                onLongClick = { if (!kids && entry.sources.any { it.machineId in connected }) menuFor = entry },
                 modifier = Modifier.remembersFocus(memory, entry.key, default = entry == entries.first()),
             )
         }
@@ -385,11 +406,6 @@ private fun LibraryRow(title: String, choice: LibraryChoice, kidsSeparate: Boole
     }
 }
 
-/** Kids' movies and series in one grid. Built in step 8. */
+/** Kids' movies and series in one grid, from every server. */
 @Composable
-fun KidsScreen(nav: Nav) {
-    Column(Modifier.fillMaxSize().padding(vertical = 36.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        TopMenu(Screen.Kids, nav)
-        Message("Nothing for kids yet.")
-    }
-}
+fun KidsScreen(plex: PlexClient, nav: Nav) = VerseGridScreen(plex, null, nav)

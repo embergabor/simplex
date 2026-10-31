@@ -117,7 +117,7 @@ class MainActivity : ComponentActivity() {
                 is Screen.Show -> ShowScreen(copiesOf(plex, s), nav)
                 is Screen.Folder -> FolderScreen(home, s.library, s.key, s.path, nav)
                 Screen.PlexVerse -> PlexVerseScreen(plex, nav)
-                Screen.Kids -> KidsScreen(nav)
+                Screen.Kids -> KidsScreen(plex, nav)
                 Screen.PlexVerseSetup -> PlexVerseSetupScreen(plex, nav)
                 is Screen.VerseGrid -> VerseGridScreen(plex, s.category, nav)
             }

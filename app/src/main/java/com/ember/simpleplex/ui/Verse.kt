@@ -45,6 +45,9 @@ object Verse {
 
     private fun normalize(title: String) = SearchMatch.terms(title).joinToString(" ")
 
+    /** A–Z order: the sort title (without "The"), ignoring case and accents. */
+    fun sortKey(item: Item) = normalize(item.titleSort ?: item.title)
+
     /** What a title is matched by: its shared ids, or without any, its title and year. */
     fun matchKeys(item: Item): List<String> =
         item.guids.filter { shared.containsMatchIn(it) }.ifEmpty { listOf("title:${normalize(item.title)}|${item.year ?: ""}") }
@@ -75,7 +78,7 @@ object Verse {
                 item = first.copy(viewOffset = newest.viewOffset, viewCount = newest.viewCount, viewedLeafCount = newest.viewedLeafCount),
                 sources = group,
             )
-        }.sortedBy { normalize(it.item.titleSort ?: it.item.title) }
+        }.sortedBy { sortKey(it.item) }
     }
 }
 
@@ -165,13 +168,20 @@ class VerseStore private constructor(context: Context, private val plex: PlexCli
         return ServerState.Done(parsed.values.sumOf { it.size })
     }
 
-    /** One category's titles merged across servers. With kids kept separate, kids' libraries are left out. */
-    fun entries(category: Category, lists: Map<String, List<Item>>): List<VerseEntry> {
+    /**
+     * One category's titles merged across servers. With kids kept separate, kids' libraries are left
+     * out, or with [kids] they're the only ones.
+     */
+    fun entries(category: Category, lists: Map<String, List<Item>>, kids: Boolean = false): List<VerseEntry> {
         val setup = prefs.setup
-        val keys = setup.libraries.filter { (_, c) -> c.category == category && !(setup.kidsSeparate && c.kids) }.keys
+        val keys = setup.libraries.filter { (_, c) -> c.category == category && (setup.kidsSeparate && c.kids) == kids }.keys
         val sources = keys.flatMap { k -> lists[k].orEmpty().map { Source(k.substringBefore('/'), it) } }
         return Verse.merge(sources, setup.ordered(sources.map { it.machineId }.distinct()))
     }
+
+    /** Kids' movies and series together, A–Z. Merged separately, since a film and a show never match. */
+    fun kidsEntries(lists: Map<String, List<Item>>): List<VerseEntry> =
+        (entries(Category.MOVIES, lists, kids = true) + entries(Category.SERIES, lists, kids = true)).sortedBy { Verse.sortKey(it.item) }
 
     companion object {
         @Volatile private var instance: VerseStore? = null

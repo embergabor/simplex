@@ -254,6 +254,7 @@ private fun ArtCard(
     focused: Boolean,
     onHeight: (Int) -> Unit,
     modifier: Modifier,
+    cornerIcon: ImageVector? = null,
 ) {
     Card(
         onClick = onClick,
@@ -269,6 +270,14 @@ private fun ArtCard(
             Artwork(url, fallback)
             if (progress > 0f) Progress(progress, Modifier.align(Alignment.BottomCenter).padding(horizontal = 10.dp, vertical = 9.dp).fillMaxWidth())
             if (watched) WatchedBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
+            if (cornerIcon != null) {
+                Icon(
+                    cornerIcon, contentDescription = null, tint = Color.White,
+                    modifier = Modifier.align(Alignment.TopStart).padding(7.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                        .padding(3.dp).size(14.dp),
+                )
+            }
             if (badge != null) {
                 Text(
                     badge,
@@ -294,12 +303,13 @@ fun PosterCard(
     onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     badge: String? = null,
+    cornerIcon: ImageVector? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     var cardHeight by remember { mutableIntStateOf(0) }
     Column(Modifier.zIndex(if (focused) 1f else 0f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ArtCard(imageUrl, title, 2f / 3f, progress, watched, badge, onClick, onLongClick, interaction, focused, { cardHeight = it }, modifier)
+        ArtCard(imageUrl, title, 2f / 3f, progress, watched, badge, onClick, onLongClick, interaction, focused, { cardHeight = it }, modifier, cornerIcon)
         Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.followCard(focused, cardHeight).padding(horizontal = 2.dp))
     }
 }
