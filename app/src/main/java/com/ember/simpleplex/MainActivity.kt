@@ -24,14 +24,19 @@ import com.ember.simpleplex.ui.AppTheme
 import com.ember.simpleplex.ui.FolderScreen
 import com.ember.simpleplex.ui.GridScreen
 import com.ember.simpleplex.ui.HomeScreen
+import com.ember.simpleplex.ui.KidsScreen
 import com.ember.simpleplex.ui.LocalRefresh
 import com.ember.simpleplex.ui.LocalRefreshBump
 import com.ember.simpleplex.ui.Nav
 import com.ember.simpleplex.ui.Palette
+import com.ember.simpleplex.ui.PlexVerseScreen
+import com.ember.simpleplex.ui.PlexVerseSetupScreen
 import com.ember.simpleplex.ui.Screen
 import com.ember.simpleplex.ui.SearchScreen
 import com.ember.simpleplex.ui.ShowScreen
 import com.ember.simpleplex.ui.SignInScreen
+
+private val TOP = setOf(Screen.Home, Screen.PlexVerse, Screen.Kids)
 
 class MainActivity : ComponentActivity() {
 
@@ -73,7 +78,15 @@ class MainActivity : ComponentActivity() {
         val states = rememberSaveableStateHolder()
         val nav = remember {
             object : Nav {
-                override fun push(screen: Screen) { stack.add(screen) }
+                override fun push(screen: Screen) {
+                    // The top menu's screens are visited once: going to one already open goes back to it.
+                    val open = if (screen in TOP) stack.indexOf(screen) else -1
+                    if (open < 0) { stack.add(screen); return }
+                    while (stack.size > open + 1) {
+                        states.removeState(stack.size - 1)
+                        stack.removeAt(stack.lastIndex)
+                    }
+                }
                 override fun play(ratingKeys: List<String>, fromStart: Boolean, shuffle: Boolean, startAt: Int, keepQueue: Boolean) {
                     startActivity(
                         Intent(this@MainActivity, PlayerActivity::class.java)
@@ -100,6 +113,9 @@ class MainActivity : ComponentActivity() {
                 is Screen.Grid -> GridScreen(home, s.library, nav)
                 is Screen.Show -> ShowScreen(home, s.show, nav)
                 is Screen.Folder -> FolderScreen(home, s.library, s.key, s.path, nav)
+                Screen.PlexVerse -> PlexVerseScreen(nav)
+                Screen.Kids -> KidsScreen(nav)
+                Screen.PlexVerseSetup -> PlexVerseSetupScreen(nav)
             }
         }
     }

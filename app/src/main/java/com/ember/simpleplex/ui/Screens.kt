@@ -64,6 +64,9 @@ sealed interface Screen {
     data class Grid(val library: Library) : Screen
     data class Show(val show: Item) : Screen
     data class Folder(val library: Library, val key: String?, val path: List<String>) : Screen
+    data object PlexVerse : Screen
+    data object Kids : Screen
+    data object PlexVerseSetup : Screen
 }
 
 // --- Sign in ---
@@ -152,6 +155,7 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 36.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
+        TopMenu(Screen.Home, nav)
         if (continuing.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
