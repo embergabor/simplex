@@ -60,7 +60,7 @@ class DescribeTest {
         )
         val pcm = stream(2, "pcm_s24le", channels = 8).copy(title = "Commentary", samplingRate = 44100)
         assertEquals(
-            TrackInfo("Audio 2 of 2", listOf("Title" to "Commentary", "Lang" to "eng", "Format" to "PCM 7.1", "Detail" to "44.1 kHz"), listOf("Plex converts")),
+            TrackInfo("Audio 2 of 2", listOf("Title" to "Commentary", "Lang" to "English", "Format" to "PCM 7.1", "Detail" to "44.1 kHz"), listOf("Plex converts")),
             Describe.audioTrack(pcm, 2, 2, choice = PlexTracks.AudioChoice.CONVERT),
         )
     }
@@ -72,5 +72,16 @@ class DescribeTest {
             TrackInfo("Subtitles 2 of 2", listOf("Lang" to "English", "Format" to "SRT · separate file"), listOf("SDH")),
             Describe.subtitleTrack(srt, 2, 2),
         )
+    }
+
+    @Test fun trackLabels() {
+        val dtsHd = stream(2, "dca", profile = "ma", channels = 2).copy(languageCode = "jpn", title = "DTS-HD Master Audio / 2.0 / 48 kHz / 2,092 kbps / 24-bit")
+        assertEquals("Japanese · DTS-HD MA Stereo", Describe.trackLabel(dtsHd))
+        val commentary = stream(2, "ac3", channels = 2).copy(title = "Commentary")
+        assertEquals("English · AC3 Stereo · Commentary", Describe.trackLabel(commentary))
+        val magyar = stream(2, "ac3", channels = 2).copy(languageCode = "hun", title = "Magyar AC3 2.0 192 kbps")
+        assertEquals("Hungarian · AC3 Stereo", Describe.trackLabel(magyar))
+        val forced = stream(3, "pgs").copy(forced = true, title = "English")
+        assertEquals("English · PGS · Forced", Describe.trackLabel(forced))
     }
 }
