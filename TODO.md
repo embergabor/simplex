@@ -37,6 +37,27 @@ Decided against for now: moving image subtitles above the open controls, an "Up 
 
 Decided against: more rows on Home, a movie info page (no detail pages is a core goal), Back twice to exit.
 
+## App-wide (planned 2026-10-31)
+
+- **Long pause on the OLED:** after 5 minutes paused, stop holding the screen on so the TV's own
+  screensaver or dimming takes over.
+- **Watched earlier:** stopping after the credits marker (or past 95% when there is none) marks the video
+  watched and takes it off Continue watching.
+- **Languages:** for a show with nothing remembered, follow what Plex selects (the account's language
+  settings). No language settings in Simplex.
+- **"Wake server" button** on the retry screen, sending Wake-on-LAN. Open question: where the server's MAC
+  address comes from (Plex doesn't report it): built in, or typed in settings.
+- **Settings screen**, from the Edit tile on Home: sign out / switch server, library visibility (what the
+  Edit tile does now), clear caches (preview thumbnails, the search copy, with their sizes), and the app
+  version and build.
+- **Updates from GitHub releases:** Simplex checks the public repo for a newer release and offers to
+  install it (needs Android's "install unknown apps" permission for Simplex). Releases are signed with a new
+  release key kept on the Mac, not on GitHub (backed up by you); built and uploaded from the Mac. Switching
+  keys needs one uninstall and reinstall on the TV, so signing in again.
+- **Startup** stays as it is: Home, with focus on Continue watching.
+
+Decided against: automating the TrueHD script on the server (stays manual).
+
 ## Bugs
 
 - **Sample 08: the AC3 compatibility track is decoded instead of passed through.** The HDMI output accepts
