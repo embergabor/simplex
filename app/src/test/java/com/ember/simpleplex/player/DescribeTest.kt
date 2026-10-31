@@ -45,4 +45,32 @@ class DescribeTest {
         assertEquals("Off", Describe.info(null, null, null, Delivery.DIRECT, null, null).subtitle)
         assertEquals(listOf("Direct play"), Describe.info(null, null, null, Delivery.DIRECT, null, null).markers)
     }
+
+    @Test fun audioTrackBox() {
+        val truehd = stream(2, "truehd", title = "English (TrueHD 7.1 Atmos)", channels = 8)
+            .copy(id = 5, language = "English", channelLayout = "7.1", samplingRate = 48000, bitrate = 4500, isDefault = true)
+        val ac3 = stream(2, "ac3", channels = 6).copy(id = 6)
+        assertEquals(
+            TrackInfo(
+                "Audio 1 of 3",
+                listOf("Lang" to "English", "Format" to "TrueHD 7.1 Atmos", "Detail" to "7.1 · 48 kHz · 4500 kbps", "Plays" to "AC3 5.1 compatibility track"),
+                listOf("Default"),
+            ),
+            Describe.audioTrack(truehd, 1, 3, playsAs = ac3),
+        )
+        val pcm = stream(2, "pcm_s24le", channels = 8).copy(title = "Commentary", samplingRate = 44100)
+        assertEquals(
+            TrackInfo("Audio 2 of 2", listOf("Title" to "Commentary", "Lang" to "eng", "Format" to "PCM 7.1", "Detail" to "44.1 kHz"), listOf("Unsupported")),
+            Describe.audioTrack(pcm, 2, 2, choice = PlexTracks.AudioChoice.WARN),
+        )
+    }
+
+    @Test fun subtitleTrackBox() {
+        assertEquals(TrackInfo("Subtitles off", emptyList(), emptyList()), Describe.subtitleTrack(null, 0, 2))
+        val srt = stream(3, "srt").copy(language = "English", key = "/library/streams/9", forced = false, hearingImpaired = true)
+        assertEquals(
+            TrackInfo("Subtitles 2 of 2", listOf("Lang" to "English", "Format" to "SRT · separate file"), listOf("SDH")),
+            Describe.subtitleTrack(srt, 2, 2),
+        )
+    }
 }

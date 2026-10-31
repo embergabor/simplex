@@ -78,6 +78,17 @@ data class Stream(
     /** Dolby Vision profile, when the video has Dolby Vision. */
     val doviProfile: Int?,
     val channels: Int?,
+    /** Language name, e.g. "English". */
+    val language: String? = null,
+    /** The track's own title in the file, e.g. "Commentary" or "SDH". */
+    val title: String? = null,
+    /** kbps. */
+    val bitrate: Int? = null,
+    val samplingRate: Int? = null,
+    /** e.g. "5.1(side)". */
+    val channelLayout: String? = null,
+    val hearingImpaired: Boolean = false,
+    val isDefault: Boolean = false,
 ) {
     val isExternal get() = key != null
 }
@@ -172,4 +183,11 @@ private fun parseStream(s: JSONObject) = Stream(
     colorTrc = s.str("colorTrc"),
     doviProfile = if (s.bool("DOVIPresent")) s.int("DOVIProfile") ?: 0 else null,
     channels = s.int("channels"),
+    language = s.str("language"),
+    title = s.str("title"),
+    bitrate = s.int("bitrate"),
+    samplingRate = s.int("samplingRate"),
+    channelLayout = s.str("audioChannelLayout"),
+    hearingImpaired = s.bool("hearingImpaired"),
+    isDefault = s.bool("default"),
 )

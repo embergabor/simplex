@@ -18,8 +18,64 @@ data class AudioInput(val mimeType: String?, val channels: Int)
 /** The lines of the info box shown with the player controls. */
 data class PlaybackInfo(val video: String, val audio: String, val subtitle: String, val markers: List<String>)
 
+/** The box shown when the remote's audio or subtitle button switches tracks. */
+data class TrackInfo(val heading: String, val lines: List<Pair<String, String>>, val markers: List<String>)
+
 @OptIn(UnstableApi::class)
 object Describe {
+
+    /** [playsAs]: the track that actually plays when that differs (a compatibility track). */
+    fun audioTrack(
+        s: Stream,
+        number: Int,
+        count: Int,
+        playsAs: Stream? = null,
+        choice: PlexTracks.AudioChoice = PlexTracks.AudioChoice.PLAY,
+    ) = TrackInfo(
+        heading = "Audio $number of $count",
+        lines = listOfNotNull(
+            s.title?.let { "Title" to it },
+            "Lang" to language(s),
+            "Format" to audioFormat(s),
+            listOfNotNull(
+                s.channelLayout,
+                s.samplingRate?.let { "${kHz(it)} kHz" },
+                s.bitrate?.let { "$it kbps" },
+            ).takeIf { it.isNotEmpty() }?.let { "Detail" to it.joinToString(" · ") },
+            playsAs?.takeIf { it.id != s.id }?.let { "Plays" to "${audioFormat(it)} compatibility track" },
+        ),
+        markers = listOfNotNull(
+            "Default".takeIf { s.isDefault },
+            "Plex converts".takeIf { choice == PlexTracks.AudioChoice.CONVERT },
+            "Unsupported".takeIf { choice == PlexTracks.AudioChoice.WARN },
+        ),
+    )
+
+    /** [s] null: subtitles off. */
+    fun subtitleTrack(s: Stream?, number: Int, count: Int) = if (s == null) {
+        TrackInfo("Subtitles off", emptyList(), emptyList())
+    } else TrackInfo(
+        heading = "Subtitles $number of $count",
+        lines = listOfNotNull(
+            s.title?.let { "Title" to it },
+            "Lang" to language(s),
+            "Format" to subtitleCodec(s.codec) + if (s.isExternal) " · separate file" else "",
+        ),
+        markers = listOfNotNull(
+            "Default".takeIf { s.isDefault },
+            "Forced".takeIf { s.forced },
+            "SDH".takeIf { s.hearingImpaired },
+        ),
+    )
+
+    private fun language(s: Stream) = s.language ?: s.languageCode ?: "Unknown"
+
+    private fun audioFormat(s: Stream): String {
+        val atmos = if (s.displayTitle.contains("Atmos", ignoreCase = true)) " Atmos" else ""
+        return "${codecName(s.codec, s.profile)} ${s.channels?.let(::channels) ?: ""}".trim() + atmos
+    }
+
+    private fun kHz(rate: Int) = if (rate % 1000 == 0) "${rate / 1000}" else "%.1f".format(java.util.Locale.ROOT, rate / 1000f)
 
     fun info(
         video: Stream?,
@@ -58,8 +114,7 @@ object Describe {
 
     fun audio(s: Stream?, delivery: Delivery, input: AudioInput?, output: AudioOutput?): String {
         if (s == null) return "—"
-        val atmos = if (s.displayTitle.contains("Atmos", ignoreCase = true)) " Atmos" else ""
-        val source = "${codecName(s.codec, s.profile)} ${s.channels?.let(::channels) ?: ""}".trim() + atmos
+        val source = audioFormat(s)
         val converted = if (delivery != Delivery.DIRECT && input != null) {
             " → Plex ${mimeName(input.mimeType)} ${channels(input.channels)}"
         } else ""

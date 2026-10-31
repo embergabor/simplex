@@ -156,6 +156,8 @@ class PlayerActivity : ComponentActivity() {
                     warning = warning.value,
                     onPrevious = { skip(-1) }.takeIf { canPrevious.value },
                     onNext = { skip(1) }.takeIf { canNext.value },
+                    planAudio = { s -> part?.let { PlexTracks.planAudio(it, s, caps::supportsEncoding) } ?: PlexTracks.AudioPlan(s, PlexTracks.AudioChoice.PLAY) },
+                    onExit = ::finish,
                 )
             }
         }

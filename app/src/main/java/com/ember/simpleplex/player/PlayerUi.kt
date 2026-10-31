@@ -3,7 +3,6 @@
 package com.ember.simpleplex.player
 
 import android.view.ViewGroup
-import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn as AndroidXOptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -106,6 +106,10 @@ fun PlayerScreen(
     /** Previous/next episode; null where there's none. */
     onPrevious: (() -> Unit)?,
     onNext: (() -> Unit)?,
+    /** How an audio track would play here, for the track box. */
+    planAudio: (Stream) -> PlexTracks.AudioPlan,
+    /** Closes the player. */
+    onExit: () -> Unit,
 ) {
     var visible by remember { mutableStateOf(true) }
     var lastInput by remember { mutableLongStateOf(0L) }
@@ -132,10 +136,8 @@ fun PlayerScreen(
         withFrameNanos { }
         runCatching { if (visible && item != null) scrub.requestFocus() else root.requestFocus() }
     }
-    BackHandler(enabled = visible && error == null) { visible = false }
-
-    // Scrubbing: left/right move a preview playhead while the video keeps playing; OK jumps there,
-    // Back cancels. Controls hiding (5 s without a key) cancels it too.
+    // Scrubbing: left/right move a preview playhead while the video keeps playing; OK jumps there.
+    // Controls hiding (Back, or 5 s without a key) cancels it.
     var scrubAt by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(visible) { if (!visible) scrubAt = null }
     var lastStepAt by remember { mutableLongStateOf(0L) }
@@ -162,7 +164,51 @@ fun PlayerScreen(
     fun cancelScrub() {
         scrubAt = null
     }
-    BackHandler(enabled = scrubAt != null) { cancelScrub() }
+
+    // The remote's audio and subtitle buttons step through the tracks. The box shows each pick at once;
+    // it's applied once the button rests for a moment, so stepping past tracks doesn't restart anything.
+    // The steps are positions in the lists, kept per video until a track is picked from the menu.
+    var audioStep by remember(item) { mutableStateOf<Int?>(null) }
+    var subtitleStep by remember(item) { mutableStateOf<Int?>(null) } // 0 = off
+    var audioPresses by remember { mutableIntStateOf(0) }
+    var subtitlePresses by remember { mutableIntStateOf(0) }
+    var trackBox by remember { mutableStateOf<TrackInfo?>(null) }
+    var trackBoxShownAt by remember { mutableLongStateOf(0L) }
+    val subtitleEntries = listOf<Stream?>(null) + subtitleOptions
+
+    fun stepAudio() {
+        if (audioOptions.isEmpty()) return
+        val from = audioStep ?: audioOptions.indexOfFirst { it.id == audio?.id }
+        val i = (from + 1).mod(audioOptions.size)
+        audioStep = i
+        val plan = planAudio(audioOptions[i])
+        trackBox = Describe.audioTrack(audioOptions[i], i + 1, audioOptions.size, plan.stream, plan.choice)
+        trackBoxShownAt = System.nanoTime()
+        audioPresses++
+    }
+    fun stepSubtitle() {
+        val from = subtitleStep ?: subtitleEntries.indexOfFirst { it?.id == subtitle?.id }
+        val i = (from + 1).mod(subtitleEntries.size)
+        subtitleStep = i
+        trackBox = Describe.subtitleTrack(subtitleEntries[i], i, subtitleOptions.size)
+        trackBoxShownAt = System.nanoTime()
+        subtitlePresses++
+    }
+    LaunchedEffect(audioPresses) {
+        delay(700)
+        val pick = audioStep?.let(audioOptions::getOrNull) ?: return@LaunchedEffect
+        if (pick.id != audio?.id) onAudio(pick)
+    }
+    LaunchedEffect(subtitlePresses) {
+        delay(700)
+        val i = subtitleStep ?: return@LaunchedEffect
+        val pick = subtitleEntries.getOrNull(i)
+        if (pick?.id != subtitle?.id) onSubtitle(pick)
+    }
+    LaunchedEffect(trackBoxShownAt) {
+        delay(4000)
+        trackBox = null
+    }
 
     Box(
         Modifier
@@ -170,10 +216,23 @@ fun PlayerScreen(
             .background(Color.Black)
             .focusRequester(root)
             .onPreviewKeyEvent { e ->
+                // Back is handled here, both press and release, so focus never steps out of the controls
+                // one level per press: the first press closes the controls, the next one stops playback.
+                if (e.key == Key.Back) {
+                    if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 0) {
+                        if (visible && item != null && error == null) visible = false else onExit()
+                    }
+                    return@onPreviewKeyEvent true
+                }
                 if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 lastInput = System.nanoTime()
+                // Logged so remotes' button codes can be checked (adb logcat -s Simplex:I).
+                if (e.nativeKeyEvent.repeatCount == 0) android.util.Log.i("Simplex", "key ${e.nativeKeyEvent.keyCode}")
+                when (e.nativeKeyEvent.keyCode) {
+                    android.view.KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK -> { if (error == null) stepAudio(); return@onPreviewKeyEvent true }
+                    android.view.KeyEvent.KEYCODE_CAPTIONS -> { if (error == null) stepSubtitle(); return@onPreviewKeyEvent true }
+                }
                 when (e.key) {
-                    Key.Back -> false
                     Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { player.togglePlay(); visible = true; true }
                     Key.MediaFastForward -> { scrub(e.nativeKeyEvent, 1); visible = true; true }
                     Key.MediaRewind -> { scrub(e.nativeKeyEvent, -1); visible = true; true }
@@ -240,13 +299,17 @@ fun PlayerScreen(
                 Text(error, fontSize = 16.sp, color = Color.White, textAlign = TextAlign.Center)
                 Text("Press Back to return", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
             }
-        } else if (visible && item != null) {
-            InfoBox(info, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
+        } else {
+            // The track box takes the info box's corner while it's up.
+            trackBox?.let { TrackBox(it, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp)) }
+        }
+        if (error == null && visible && item != null) {
+            if (trackBox == null) InfoBox(info, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
             Controls(
                 item, duration, audio, subtitle, isPlaying, position, scrubAt, previews, scrub,
                 onPrevious, onNext, onTogglePlay = { player.togglePlay() },
                 modifier = Modifier.align(Alignment.BottomCenter),
-                onPick = { picker = it },
+                onPick = { audioStep = null; subtitleStep = null; picker = it },
                 onKey = { e ->
                     when (e.key) {
                         Key.DirectionLeft -> { scrub(e.nativeKeyEvent, -1); true }
@@ -392,14 +455,34 @@ private fun InfoBox(info: PlaybackInfo, modifier: Modifier) {
         InfoLine("Video", info.video)
         InfoLine("Audio", info.audio)
         InfoLine("Subs", info.subtitle)
-        Row(Modifier.padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            info.markers.forEach {
-                Text(
-                    it,
-                    modifier = Modifier.border(1.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
-                    fontSize = 8.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
-                )
-            }
+        Markers(info.markers)
+    }
+}
+
+/** Details of the track the remote's audio or subtitle button just switched to; styled like [InfoBox]. */
+@Composable
+private fun TrackBox(info: TrackInfo, modifier: Modifier) {
+    Column(
+        modifier
+            .background(Color(0xCC3A3A3E), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(info.heading, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+        info.lines.forEach { (label, value) -> InfoLine(label, value) }
+        if (info.markers.isNotEmpty()) Markers(info.markers)
+    }
+}
+
+@Composable
+private fun Markers(markers: List<String>) {
+    Row(Modifier.padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        markers.forEach {
+            Text(
+                it,
+                modifier = Modifier.border(1.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                fontSize = 8.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+            )
         }
     }
 }
