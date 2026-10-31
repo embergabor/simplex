@@ -24,6 +24,8 @@ data class Item(
     val viewedLeafCount: Int,
     val librarySectionId: String?,
     val media: List<Media>,
+    /** Plex's description; only used for searching episodes. */
+    val summary: String? = null,
 ) {
     val isEpisode get() = type == "episode"
 
@@ -136,6 +138,7 @@ internal fun parseItem(o: JSONObject) = Item(
     leafCount = o.int("leafCount") ?: 0,
     viewedLeafCount = o.int("viewedLeafCount") ?: 0,
     librarySectionId = o.str("librarySectionID"),
+    summary = o.str("summary"),
     media = o.optJSONArray("Media").objects().map { m ->
         Media(
             parts = m.optJSONArray("Part").objects().map { p ->

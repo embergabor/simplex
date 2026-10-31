@@ -6,9 +6,6 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -154,11 +151,13 @@ class PlexClient private constructor(context: Context) {
 
     suspend fun libraryItems(sectionKey: String) = get("/library/sections/$sectionKey/all?sort=titleSort").items()
 
-    /** Titles containing [query] in each of [libraries], asked in parallel; libraries with no match are left out. */
-    suspend fun search(libraries: List<Library>, query: String): List<Pair<Library, List<Item>>> = coroutineScope {
-        libraries.map { lib ->
-            async { lib to get("/library/sections/${lib.key}/all?sort=titleSort&title=${enc(query)}").items() }
-        }.awaitAll().filter { it.second.isNotEmpty() }
+    /**
+     * A library's list as Plex's raw JSON, for search to keep a copy on the TV: its titles, or with
+     * [episodes] every episode of a TV library (with descriptions). Read back with [parseItems].
+     */
+    suspend fun libraryJson(sectionKey: String, episodes: Boolean): String {
+        val path = "/library/sections/$sectionKey/all?" + if (episodes) "type=4" else "sort=titleSort"
+        return call(Request.Builder().url(requireNotNull(serverUri) + path).plexHeaders(token).build())
     }
 
     suspend fun episodes(showKey: String) = get("/library/metadata/$showKey/allLeaves").items()
@@ -286,6 +285,8 @@ class PlexClient private constructor(context: Context) {
         const val PRODUCT = "Simplex"
         private const val TAG = "Simplex"
         private const val PLEX_TV = "https://plex.tv/api/v2"
+
+        fun parseItems(json: String): List<Item> = (JSONObject(json).optJSONObject("MediaContainer") ?: JSONObject()).items()
 
         @Volatile private var instance: PlexClient? = null
 
