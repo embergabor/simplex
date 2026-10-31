@@ -1,69 +1,41 @@
 # TODO
 
-## Player polish (planned 2026-10-31)
+## Built, to check on the TV (2026-10-31)
 
-- **Track labels.** The Audio and Subtitles buttons show "Language · format" ("Japanese · DTS-HD MA 2.0",
-  "English · PGS"), plus the track's own title only when it has one ("Commentary"), never the file's raw
-  track title.
-- **Buffering spinner.** A small spinner in the middle while loading or buffering (also while Plex restarts
-  a conversion after a seek), shown only after about 0.5 s so quick waits don't flash it.
-- **OK toggles play/pause** on the progress bar when not scrubbing; while scrubbing it still jumps there.
-- **Intro and credits markers.** Plex's markers (`includeMarkers=1`): a "Skip intro" button during the
-  intro and a "Next episode" button during the credits; OK presses it. Nothing happens automatically.
-- **Resume rules.** Only Home's Continue watching row and the show page's Play button resume; everything
-  else (episode cards, movies, favourites, search, folders) starts from the beginning. The hold-OK menu
-  offers "Resume from 23:10" on partly watched items (on Continue watching it stays "Play from beginning").
-- **Languages per show.** Changing audio or subtitle language (or subtitles off) is remembered on the TV per
-  show and applied to its episodes whenever they start, when the file has that language.
-- **Playback errors.** When direct play fails: retry once from the same spot, then play through Plex's
-  conversion, and show the error only if that fails too.
+Player:
+- Audio/Subtitles buttons read "Japanese · DTS-HD MA Stereo"; a track's own title only when it says more.
+- The audio/subtitle remote buttons show the info box alone, with the stepped track underneath.
+- Spinner while loading, buffering or waiting on Plex (after 0.5 s).
+- OK on the progress bar pauses and resumes (still jumps while scrubbing).
+- "Skip intro" / "Next episode" from Plex's markers while the controls are hidden (OK presses it). The
+  server has intro markers; no credits markers seen yet.
+- Resume only from Continue watching and the show page's Play; everything else starts from 0:00.
+- Audio and subtitle language (or subtitles off) remembered per show.
+- Direct play errors: one retry from the same spot, then Plex's conversion, then the error.
+- Paused 5 minutes: the screen is let go, so the TV's screensaver can run.
+- Stopped in the end credits (or past 95%): marked watched.
 
-Decided against for now: moving image subtitles above the open controls, an "Up next" countdown, a clock.
+Screens:
+- Hold-OK menu: Resume from …, Remove from Continue watching, Go to show, Info (short summary popup).
+- Library grid: sort (A–Z, Recently added, Year), an A–Z jump column, two-line poster titles.
+- Show page: moving up/down into a season lands on its first episode; episode cards show the air date.
+- Search keeps the last search until cleared, with recent searches as quick picks.
+- Settings (Home's tile, was Edit): libraries on Home, clear caches, sign out, build info.
 
-## Screens polish (planned 2026-10-31)
+Updates:
+- Release key in `~/.simplex-release` (back it up: without it no release can update the TV). Versions are
+  0.2.<commit count>. `tools/release.sh` builds, checks the signature and publishes a GitHub release.
+- Release builds look for a newer GitHub release: an "Update" tile on Home, installed from Settings.
+- Switching the TV to the release key needs one uninstall and reinstall (signing in again).
 
-- **Continue watching hold-OK menu** adds "Remove from Continue watching" (not marking it watched) and, for
-  episodes, "Go to show"; "Mark as watched" stays.
-- **Library grid:** a slim A–Z column on the right to jump to a letter, and sort options at the top
-  (A–Z, Recently added, Year).
-- **Posters** show the title underneath always, not only when focused.
-- **Show page:** moving up or down to another season lands on that season's first episode.
-- **Episode cards** show the air date.
-- **Info in the hold-OK menu:** an "Info" button opens a second popup with year and length (episodes:
-  "S2 · E4 · aired 12 May 2015 · 58m"), video and audio format (with "+N more" tracks), subtitle languages,
-  and file size and name. A short summary, not a full media-info dump. Never a detail page.
-- **Search** remembers the last query and its results until cleared, and shows recent searches as quick
-  picks under the field.
+## Open
 
-Decided against: more rows on Home, a movie info page (no detail pages is a core goal), Back twice to exit.
-
-## App-wide (planned 2026-10-31)
-
-- **Long pause on the OLED:** after 5 minutes paused, stop holding the screen on so the TV's own
-  screensaver or dimming takes over.
-- **Watched earlier:** stopping after the credits marker (or past 95% when there is none) marks the video
-  watched and takes it off Continue watching.
-- **Languages:** for a show with nothing remembered, follow what Plex selects (the account's language
-  settings). No language settings in Simplex.
-- **"Wake server" button** on the retry screen, sending Wake-on-LAN. Open question: where the server's MAC
-  address comes from (Plex doesn't report it): built in, or typed in settings.
-- **Settings screen**, from the Edit tile on Home: sign out / switch server, library visibility (what the
-  Edit tile does now), clear caches (preview thumbnails, the search copy, with their sizes), and the app
-  version and build.
-- **Updates from GitHub releases:** Simplex checks the public repo for a newer release and offers to
-  install it (needs Android's "install unknown apps" permission for Simplex). Releases are signed with a new
-  release key kept on the Mac, not on GitHub (backed up by you); built and uploaded from the Mac. Switching
-  keys needs one uninstall and reinstall on the TV, so signing in again.
-- **Startup** stays as it is: Home, with focus on Continue watching.
-
-Decided against: automating the TrueHD script on the server (stays manual).
-
-## Bugs
-
+- **"Wake server" button** on the retry screen: where the server's MAC address comes from (Plex doesn't
+  report it): built in, or typed in Settings.
 - **Sample 08: the AC3 compatibility track is decoded instead of passed through.** The HDMI output accepts
   AC3 and sample 01 (AC3 only) passes through; here ExoPlayer gave the AC3 track to the FFmpeg decoder. The
-  file's default track is TrueHD, likely related. Debug builds now log track mapping (logcat tag
-  EventLogger): replay 08, pick the AC3 track, read the log.
+  file's default track is TrueHD, likely related. Debug builds log track mapping (logcat tag EventLogger):
+  replay 08, pick the AC3 track, read the log.
 
 ## Later
 
@@ -72,3 +44,6 @@ Decided against: automating the TrueHD script on the server (stays manual).
   the video, because the Sony's picture mode brightens and adds contrast and colour to the video layer only,
   not to the app's graphics on top. Idea: a per-channel lookup like the HDR tone-map in `PreviewThumbs.kt`
   (deeper blacks, a bit more contrast and saturation), tuned by eye on the TV.
+
+Decided against: moving image subtitles above the open controls, an "Up next" countdown, a clock, more rows
+on Home, a movie info page (no detail pages is a core goal), Back twice to exit, automating the TrueHD script.
