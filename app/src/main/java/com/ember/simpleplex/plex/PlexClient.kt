@@ -6,6 +6,9 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -150,6 +153,13 @@ class PlexClient private constructor(context: Context) {
     }
 
     suspend fun libraryItems(sectionKey: String) = get("/library/sections/$sectionKey/all?sort=titleSort").items()
+
+    /** Titles containing [query] in each of [libraries], asked in parallel; libraries with no match are left out. */
+    suspend fun search(libraries: List<Library>, query: String): List<Pair<Library, List<Item>>> = coroutineScope {
+        libraries.map { lib ->
+            async { lib to get("/library/sections/${lib.key}/all?sort=titleSort&title=${enc(query)}").items() }
+        }.awaitAll().filter { it.second.isNotEmpty() }
+    }
 
     suspend fun episodes(showKey: String) = get("/library/metadata/$showKey/allLeaves").items()
 

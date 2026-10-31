@@ -46,6 +46,13 @@ class AudioTest {
         }
     }
 
+    @Test fun withoutReceiverEverythingDecodesHere() {
+        val speakers: (Int) -> Boolean = { false }
+        for (s in listOf(audio("truehd", 8), audio("pcm_s24le", 8), audio("ac3", 6), audio("dca", 6))) {
+            assertEquals(s.codec, PlexTracks.AudioChoice.PLAY, PlexTracks.planAudio(part(s), s, speakers).choice)
+        }
+    }
+
     @Test fun stereoAndBitstreamsJustPlay() {
         for (s in listOf(audio("aac", 2), audio("pcm_s16le", 2), audio("dca", 6, profile = "ma"), audio("eac3", 6), audio("ac3", 6))) {
             assertEquals(s.codec, PlexTracks.AudioChoice.PLAY, PlexTracks.planAudio(part(s), s, tv).choice)

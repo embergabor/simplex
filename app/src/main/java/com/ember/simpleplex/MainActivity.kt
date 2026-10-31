@@ -29,6 +29,7 @@ import com.ember.simpleplex.ui.LocalRefreshBump
 import com.ember.simpleplex.ui.Nav
 import com.ember.simpleplex.ui.Palette
 import com.ember.simpleplex.ui.Screen
+import com.ember.simpleplex.ui.SearchScreen
 import com.ember.simpleplex.ui.ShowScreen
 import com.ember.simpleplex.ui.SignInScreen
 
@@ -92,6 +93,7 @@ class MainActivity : ComponentActivity() {
         states.SaveableStateProvider(stack.size - 1) {
             when (val s = stack.last()) {
                 Screen.Home -> HomeScreen(plex, nav)
+                Screen.Search -> SearchScreen(plex, nav)
                 is Screen.Grid -> GridScreen(plex, s.library, nav)
                 is Screen.Show -> ShowScreen(plex, s.show, nav)
                 is Screen.Folder -> FolderScreen(plex, s.library, s.key, s.path, nav)

@@ -72,6 +72,8 @@ object PlexTracks {
      */
     fun planAudio(part: Part, chosen: Stream?, passthrough: (Int) -> Boolean): AudioPlan {
         if (chosen == null || !reachesAsStereo(chosen, passthrough)) return AudioPlan(chosen, AudioChoice.PLAY)
+        // No receiver (TV speakers, headphones): nothing goes out as surround anyway, so decode it here.
+        if (compatRank.keys.none(passthrough)) return AudioPlan(chosen, AudioChoice.PLAY)
         val compat = audioStreams(part)
             .filter { it.id != chosen.id && it.languageCode == chosen.languageCode }
             .mapNotNull { s -> encoding(s)?.takeIf { it in compatRank && passthrough(it) }?.let { s to compatRank.getValue(it) } }

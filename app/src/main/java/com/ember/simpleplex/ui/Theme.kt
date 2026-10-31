@@ -49,6 +49,7 @@ object Icons {
     val Check = stroke("m5 12.5 4.5 4.5L19 7.5", width = 2.4f)
     val Subtitles = stroke("M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M7 12h3 M12 12h5 M7 15.5h6 M15 15.5h2")
     val Audio = stroke("M4 9v6h4l5 4V5L8 9z M16.5 8.5a5 5 0 0 1 0 7")
+    val Search = stroke("M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13z M15.5 15.5 20 20", width = 2f)
     val Edit = stroke("M4 20h4L19 9l-4-4L4 16z M14 6l4 4")
     val Previous = fill("M5 5h2.6v14H5z M19.5 5v14L8.5 12z")
     val Next = fill("M16.4 5H19v14h-2.6z M4.5 5v14l11-7z")

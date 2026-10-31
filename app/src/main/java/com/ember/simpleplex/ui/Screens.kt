@@ -56,6 +56,7 @@ import kotlinx.coroutines.delay
 
 sealed interface Screen {
     data object Home : Screen
+    data object Search : Screen
     data class Grid(val library: Library) : Screen
     data class Show(val show: Item) : Screen
     data class Folder(val library: Library, val key: String?, val path: List<String>) : Screen
@@ -185,6 +186,14 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                         },
                         modifier = Modifier.size(180.dp, 108.dp)
                             .remembersFocus(memory, "l" + lib.key, default = continuing.isEmpty() && i == 0),
+                    )
+                }
+                item(key = "search") {
+                    IconTile(
+                        icon = Icons.Search,
+                        label = "Search",
+                        onClick = { nav.push(Screen.Search) },
+                        modifier = Modifier.size(108.dp, 108.dp).remembersFocus(memory, "search"),
                     )
                 }
                 item(key = "edit") {
