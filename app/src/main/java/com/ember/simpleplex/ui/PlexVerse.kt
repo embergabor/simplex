@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -110,10 +111,14 @@ private fun ContinueRow(plex: PlexClient, store: VerseStore, kids: Boolean, nav:
     val connected by store.connected.collectAsState()
     val row = remember(lists, continuing) { store.continuingRow(kids, lists, continuing) }
     var menuFor by remember { mutableStateOf<Continuing?>(null) }
+    // A title just watched comes in first; the row would otherwise stay scrolled on the old first card.
+    val rowState = rememberLazyListState()
+    LaunchedEffect(row.firstOrNull()?.sources?.first()?.ref) { rowState.scrollToItem(0) }
     if (row.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
         LazyRow(
+            state = rowState,
             contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(20.dp),
         ) {
