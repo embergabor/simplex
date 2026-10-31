@@ -9,4 +9,10 @@ class LibraryPrefs(context: Context) {
     var hidden: Set<String>
         get() = prefs.getStringSet("hiddenLibraries", emptySet()).orEmpty().toSet()
         set(value) { prefs.edit().putStringSet("hiddenLibraries", value).apply() }
+
+    /** How a library's grid is sorted, by library key. */
+    fun sort(library: String): GridSort =
+        runCatching { GridSort.valueOf(prefs.getString("sort.$library", null) ?: "") }.getOrDefault(GridSort.TITLE)
+
+    fun setSort(library: String, sort: GridSort) = prefs.edit().putString("sort.$library", sort.name).apply()
 }

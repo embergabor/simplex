@@ -19,6 +19,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import kotlinx.coroutines.launch
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Surface
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -257,33 +264,98 @@ fun GridScreen(plex: PlexClient, library: Library, nav: Nav) {
     val result by load(library.key, refresh) { plex.libraryItems(library.key) }
     val memory = rememberFocusMemory()
     var menuFor by remember { mutableStateOf<Item?>(null) }
-    val items = result?.getOrElse { return ErrorMessage("Couldn't load ${library.title}.\n${it.message}") } ?: return
-    if (items.isEmpty()) return Message("${library.title} is empty.")
+    val prefs = LibraryPrefs(LocalContext.current)
+    var sort by remember { mutableStateOf(prefs.sort(library.key)) }
+    val grid = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+    // A letter picked in the A–Z column: its first poster takes focus once it's on screen.
+    var jumpTo by remember { mutableStateOf<String?>(null) }
+    val all = result?.getOrElse { return ErrorMessage("Couldn't load ${library.title}.\n${it.message}") } ?: return
+    if (all.isEmpty()) return Message("${library.title} is empty.")
+    val items = remember(all, sort) { sort.apply(all) }
+    val letters = remember(items, sort) { if (sort == GridSort.TITLE) GridSort.letters(items) else emptyList() }
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(6),
-        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 40.dp),
-        horizontalArrangement = Arrangement.spacedBy(24.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp),
-    ) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Box(Modifier.padding(bottom = 4.dp)) { ScreenTitle(library.title, "A–Z") }
+    Row(Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(6),
+            state = grid,
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(start = 48.dp, end = if (letters.isEmpty()) 48.dp else 20.dp, top = 40.dp, bottom = 40.dp),
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(
+                    Modifier.padding(bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(Modifier.weight(1f)) { ScreenTitle(library.title) }
+                    GridSort.entries.forEach { option ->
+                        PillButton(option.label, {
+                            sort = option
+                            prefs.setSort(library.key, option)
+                            scope.launch { grid.scrollToItem(0) }
+                        }, selected = option == sort)
+                    }
+                }
+            }
+            items(items, key = { it.ratingKey }) { item ->
+                val jump = remember { FocusRequester() }
+                if (jumpTo == item.ratingKey) {
+                    LaunchedEffect(Unit) {
+                        withFrameNanos { }
+                        runCatching { jump.requestFocus() }
+                        jumpTo = null
+                    }
+                }
+                PosterCard(
+                    title = item.title,
+                    imageUrl = plex.image(item.thumb, 248, 372),
+                    progress = item.progress,
+                    watched = item.watched,
+                    onClick = {
+                        if (library.kind == Library.Kind.SHOWS) nav.push(Screen.Show(item)) else nav.play(listOf(item.ratingKey))
+                    },
+                    onLongClick = { menuFor = item },
+                    modifier = Modifier.focusRequester(jump).remembersFocus(memory, item.ratingKey, default = item == items.first()),
+                )
+            }
         }
-        items(items, key = { it.ratingKey }) { item ->
-            PosterCard(
-                title = item.title,
-                imageUrl = plex.image(item.thumb, 248, 372),
-                progress = item.progress,
-                watched = item.watched,
-                onClick = {
-                    if (library.kind == Library.Kind.SHOWS) nav.push(Screen.Show(item)) else nav.play(listOf(item.ratingKey))
-                },
-                onLongClick = { menuFor = item },
-                modifier = Modifier.remembersFocus(memory, item.ratingKey, default = item == items.first()),
-            )
+        if (letters.isNotEmpty()) {
+            LetterColumn(letters, Modifier.padding(top = 40.dp, bottom = 24.dp, end = 16.dp)) { first ->
+                jumpTo = items[first].ratingKey
+                // +1 for the title row.
+                scope.launch { grid.scrollToItem(first + 1) }
+            }
         }
     }
     menuFor?.let { ItemMenu(plex, it, nav) { menuFor = null } }
+}
+
+/** The letters a sorted grid has, top to bottom; OK jumps to the first title under one. */
+@Composable
+private fun LetterColumn(letters: List<Pair<Char, Int>>, modifier: Modifier, onJump: (Int) -> Unit) {
+    Column(modifier.fillMaxHeight(), verticalArrangement = Arrangement.SpaceEvenly) {
+        letters.forEach { (letter, first) ->
+            Surface(
+                onClick = { onJump(first) },
+                modifier = Modifier.size(22.dp, 17.dp),
+                shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(4.dp)),
+                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.15f),
+                colors = ClickableSurfaceDefaults.colors(
+                    containerColor = Color.Transparent,
+                    contentColor = Palette.Secondary,
+                    focusedContainerColor = Palette.Ink,
+                    focusedContentColor = Color.White,
+                ),
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(letter.toString(), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
 }
 
 // --- One show: Play / Shuffle, its favourite episodes, then one row per season ---

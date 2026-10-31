@@ -33,6 +33,8 @@ data class Item(
     val airDate: String? = null,
     /** When it was added to the library, in seconds since 1970. */
     val addedAt: Long = 0,
+    /** The title Plex sorts by ("Abyss, The"); the title when it has none. */
+    val titleSort: String = title,
     /** Plex's intro and credits markers; only in full metadata. */
     val markers: List<Marker> = emptyList(),
 ) {
@@ -181,6 +183,7 @@ internal fun parseItem(o: JSONObject) = Item(
     year = o.int("year"),
     airDate = o.str("originallyAvailableAt"),
     addedAt = o.long("addedAt") ?: 0,
+    titleSort = o.str("titleSort") ?: o.str("title") ?: "",
     markers = o.optJSONArray("Marker").objects().mapNotNull { m ->
         Marker(m.str("type") ?: return@mapNotNull null, m.long("startTimeOffset") ?: return@mapNotNull null, m.long("endTimeOffset") ?: return@mapNotNull null, m.bool("final"))
     },

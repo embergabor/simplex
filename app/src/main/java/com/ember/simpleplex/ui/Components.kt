@@ -296,7 +296,8 @@ fun PosterCard(
     var cardHeight by remember { mutableIntStateOf(0) }
     Column(Modifier.zIndex(if (focused) 1f else 0f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ArtCard(imageUrl, title, 2f / 3f, progress, watched, null, onClick, onLongClick, interaction, focused, { cardHeight = it }, modifier)
-        Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.followCard(focused, cardHeight).padding(horizontal = 2.dp))
+        // Two lines, so long titles can be read; always two, so the grid's rows line up.
+        Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Ink, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.followCard(focused, cardHeight).padding(horizontal = 2.dp))
     }
 }
 
