@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +52,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -155,6 +157,31 @@ fun SectionTitle(title: String, modifier: Modifier = Modifier) {
 fun Message(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(text, fontSize = 15.sp, color = Palette.Secondary, textAlign = TextAlign.Center)
+    }
+}
+
+/**
+ * A row that moving up or down into always lands on its first item (scrolled back to the start), not
+ * on whatever happens to sit above or below. Give the first item the [first] requester. Focus put
+ * back directly (after Back or the player) isn't affected.
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+@Composable
+fun Modifier.entersOnFirst(state: LazyListState, first: FocusRequester): Modifier {
+    val scope = rememberCoroutineScope()
+    return focusProperties {
+        enter = {
+            if (state.firstVisibleItemIndex == 0) first
+            else {
+                // The first item isn't laid out while scrolled away: scroll back, then focus it.
+                scope.launch {
+                    state.scrollToItem(0)
+                    withFrameNanos { }
+                    runCatching { first.requestFocus() }
+                }
+                FocusRequester.Cancel
+            }
+        }
     }
 }
 

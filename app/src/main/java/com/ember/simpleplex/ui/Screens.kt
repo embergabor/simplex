@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.lazy.rememberLazyListState
 import kotlinx.coroutines.launch
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -166,7 +165,11 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
         if (continuing.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
+                val first = remember { FocusRequester() }
+                val rowState = rememberLazyListState()
                 LazyRow(
+                    state = rowState,
+                    modifier = Modifier.entersOnFirst(rowState, first),
                     contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
@@ -181,7 +184,9 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                             onClick = { nav.play(listOf(item.ratingKey), resume = true) },
                             onLongClick = { menuFor = item },
                             width = 200.dp,
-                            modifier = Modifier.remembersFocus(memory, "c" + item.ratingKey, default = item == continuing.first()),
+                            modifier = Modifier
+                                .then(if (item == continuing.first()) Modifier.focusRequester(first) else Modifier)
+                                .remembersFocus(memory, "c" + item.ratingKey, default = item == continuing.first()),
                         )
                     }
                 }
@@ -193,7 +198,11 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
         )
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SectionTitle("Libraries", Modifier.padding(horizontal = 48.dp))
+            val first = remember { FocusRequester() }
+            val rowState = rememberLazyListState()
             LazyRow(
+                state = rowState,
+                modifier = Modifier.entersOnFirst(rowState, first),
                 contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
             ) {
@@ -209,6 +218,7 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                             nav.push(if (lib.kind == Library.Kind.OTHER) Screen.Folder(lib, null, emptyList()) else Screen.Grid(lib))
                         },
                         modifier = Modifier.size(180.dp, 108.dp)
+                            .then(if (i == 0) Modifier.focusRequester(first) else Modifier)
                             .remembersFocus(memory, "l" + lib.key, default = continuing.isEmpty() && i == 0),
                     )
                 }
@@ -218,7 +228,9 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                             icon = Icons.Next,
                             label = "Update ${release.version}",
                             onClick = { nav.push(Screen.Settings) },
-                            modifier = Modifier.size(150.dp, 108.dp).remembersFocus(memory, "update"),
+                            modifier = Modifier.size(150.dp, 108.dp)
+                                .then(if (libraries.isEmpty()) Modifier.focusRequester(first) else Modifier)
+                                .remembersFocus(memory, "update"),
                         )
                     }
                 }
@@ -227,7 +239,9 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
                         icon = Icons.Settings,
                         label = "Settings",
                         onClick = { nav.push(Screen.Settings) },
-                        modifier = Modifier.size(108.dp, 108.dp).remembersFocus(memory, "settings", default = allLibraries.isEmpty()),
+                        modifier = Modifier.size(108.dp, 108.dp)
+                            .then(if (libraries.isEmpty() && update == null) Modifier.focusRequester(first) else Modifier)
+                            .remembersFocus(memory, "settings", default = allLibraries.isEmpty()),
                     )
                 }
             }
@@ -340,7 +354,6 @@ private fun LetterColumn(letters: List<Pair<Char, Int>>, modifier: Modifier, onJ
 
 // --- One show: Play / Shuffle, its favourite episodes, then one row per season ---
 
-@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
     val refresh = LocalRefresh.current
@@ -439,9 +452,7 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
                     val rowState = rememberLazyListState()
                     LazyRow(
                         state = rowState,
-                        modifier = Modifier.focusProperties {
-                            enter = { if (rowState.firstVisibleItemIndex == 0) firstEpisode else FocusRequester.Default }
-                        },
+                        modifier = Modifier.entersOnFirst(rowState, firstEpisode),
                         contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
                         horizontalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
