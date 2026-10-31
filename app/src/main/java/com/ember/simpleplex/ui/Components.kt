@@ -72,6 +72,7 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.PlexClient
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // --- Navigation and refresh plumbing ---
@@ -142,6 +143,34 @@ fun SectionTitle(title: String, modifier: Modifier = Modifier) {
 fun Message(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(text, fontSize = 15.sp, color = Palette.Secondary, textAlign = TextAlign.Center)
+    }
+}
+
+/**
+ * A load that failed, usually because the server is asleep or still starting (e.g. after Wake-on-LAN).
+ * Tries again by itself every few seconds, or right away with the button. A retry reloads every screen's
+ * data (the same refresh as coming back from the player), and the message stays until something loads.
+ */
+@Composable
+fun ErrorMessage(text: String, modifier: Modifier = Modifier.fillMaxSize()) {
+    val retry = LocalRefreshBump.current
+    val button = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        runCatching { button.requestFocus() }
+        while (true) {
+            delay(5000)
+            retry()
+        }
+    }
+    Column(
+        modifier.padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+    ) {
+        Text(text, fontSize = 15.sp, color = Palette.Secondary, textAlign = TextAlign.Center)
+        Text("Trying again every few seconds.", fontSize = 12.sp, color = Palette.Secondary)
+        PillButton("Try again now", retry, Modifier.focusRequester(button))
     }
 }
 

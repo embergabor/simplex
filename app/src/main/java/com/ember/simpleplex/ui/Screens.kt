@@ -127,7 +127,7 @@ fun SignInScreen(plex: PlexClient, onDone: () -> Unit) {
 @Composable
 fun HomeScreen(plex: PlexClient, nav: Nav) {
     val refresh = LocalRefresh.current
-    val libs by load(Unit) { plex.libraries() }
+    val libs by load(refresh) { plex.libraries() }
     val cont by load(refresh) { plex.continueWatching() }
     val memory = rememberFocusMemory()
     var menuFor by remember { mutableStateOf<Item?>(null) }
@@ -137,7 +137,7 @@ fun HomeScreen(plex: PlexClient, nav: Nav) {
     var hidden by remember { mutableStateOf(prefs.hidden) }
     var editing by remember { mutableStateOf(false) }
 
-    val allLibraries = libs?.getOrElse { return Message("Couldn't reach your Plex server.\n${it.message}") } ?: return
+    val allLibraries = libs?.getOrElse { return ErrorMessage("Couldn't reach your Plex server.\n${it.message}") } ?: return
     val libraries = allLibraries.filter { it.key !in hidden }
     // Hiding a library also hides what you were watching in it.
     val continuing = (cont?.getOrNull() ?: if (cont == null) return else emptyList())
@@ -253,7 +253,7 @@ fun GridScreen(plex: PlexClient, library: Library, nav: Nav) {
     val result by load(library.key, refresh) { plex.libraryItems(library.key) }
     val memory = rememberFocusMemory()
     var menuFor by remember { mutableStateOf<Item?>(null) }
-    val items = result?.getOrElse { return Message("Couldn't load ${library.title}.\n${it.message}") } ?: return
+    val items = result?.getOrElse { return ErrorMessage("Couldn't load ${library.title}.\n${it.message}") } ?: return
     if (items.isEmpty()) return Message("${library.title} is empty.")
 
     LazyVerticalGrid(
@@ -290,7 +290,7 @@ fun ShowScreen(plex: PlexClient, show: Item, nav: Nav) {
     val result by load(show.ratingKey, refresh) { Episodes.ordered(plex.episodes(show.ratingKey)) }
     val memory = rememberFocusMemory()
     var menuFor by remember { mutableStateOf<Item?>(null) }
-    val episodes = result?.getOrElse { return Message("Couldn't load ${show.title}.\n${it.message}") } ?: return
+    val episodes = result?.getOrElse { return ErrorMessage("Couldn't load ${show.title}.\n${it.message}") } ?: return
     if (episodes.isEmpty()) return Message("${show.title} has no episodes.")
 
     val next = Episodes.nextUp(episodes)
@@ -370,7 +370,7 @@ fun FolderScreen(plex: PlexClient, library: Library, key: String?, path: List<St
     val result by load(key, refresh) { plex.folder(library.key, key) }
     val memory = rememberFocusMemory()
     var menuFor by remember { mutableStateOf<Item?>(null) }
-    val entries = result?.getOrElse { return Message("Couldn't load this folder.\n${it.message}") } ?: return
+    val entries = result?.getOrElse { return ErrorMessage("Couldn't load this folder.\n${it.message}") } ?: return
     if (entries.isEmpty()) return Message("This folder is empty.")
 
     val folders = entries.filterIsInstance<FolderEntry.Folder>()

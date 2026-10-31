@@ -140,14 +140,15 @@ fun SearchScreen(plex: PlexClient, nav: Nav) {
     val hidden = remember { LibraryPrefs(context).hidden }
     val cache = remember { SearchCache(context, plex) }
     var loaded by remember { mutableStateOf<Result<List<LibraryIndex>>?>(null) }
-    LaunchedEffect(Unit) {
+    val refresh = LocalRefresh.current
+    LaunchedEffect(refresh) {
         // The saved copy first, if there is one, then the current lists from Plex.
         val libraries = try {
             plex.libraries().filter { it.key !in hidden }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            loaded = Result.failure(e)
+            if (loaded?.isSuccess != true) loaded = Result.failure(e)
             return@LaunchedEffect
         }
         withContext(Dispatchers.Default) { runCatching { cache.read(libraries)?.let(::index) }.getOrNull() }
@@ -241,7 +242,9 @@ fun SearchScreen(plex: PlexClient, nav: Nav) {
 
         val failure = loaded?.exceptionOrNull()
         when {
-            failure != null -> hint("Couldn't load your libraries.\n${failure.message}")
+            failure != null -> item(span = { GridItemSpan(maxLineSpan) }) {
+                ErrorMessage("Couldn't load your libraries.\n${failure.message}", Modifier.fillMaxWidth())
+            }
             !searching -> {}
             found == null -> hint("Loading your libraries…")
             found.isEmpty() -> hint("Nothing found for “${query.trim()}”.")
