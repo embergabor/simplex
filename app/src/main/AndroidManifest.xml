@@ -11,6 +11,7 @@
         android:icon="@drawable/icon"
         android:banner="@drawable/banner"
         android:usesCleartextTraffic="true"
+        android:largeHeap="true"
         android:theme="@style/Theme.Simplex">
 
         <activity

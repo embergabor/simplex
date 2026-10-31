@@ -19,6 +19,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.DecoderReuseEvaluation
@@ -117,6 +118,7 @@ class PlayerActivity : ComponentActivity() {
                 true,
             )
             .setHandleAudioBecomingNoisy(true)
+            .setLoadControl(loadControl())
             .setMediaSourceFactory(DefaultMediaSourceFactory(this).setSubtitleParserFactory(SubtitleParsers()))
             .build()
         player.addListener(listener)
@@ -484,6 +486,18 @@ class PlayerActivity : ComponentActivity() {
         canPrevious.value = episode && index > 0
         canNext.value = episode && index < queue.size - 1
     }
+
+    /**
+     * Buffers by time rather than size. Blu-ray remuxes can hold several seconds of 40+ Mbit/s video before
+     * the first sample of the chosen audio track (Totoro: 26 MB), more than ExoPlayer's default size limit,
+     * so it stopped loading before it could start ("stuck buffering"). Here it keeps loading until every
+     * chosen track has 10 s buffered, past the size limit if it must; the app has a large heap for that.
+     */
+    private fun loadControl() = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(10_000, 30_000, 1_000, 2_000)
+        .setTargetBufferBytes(96 * 1024 * 1024)
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
 
     /**
      * Video only ever goes through the TV's hardware decoder: it's what deinterlaces and handles HDR,
