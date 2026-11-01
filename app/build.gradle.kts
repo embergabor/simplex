@@ -1,6 +1,8 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    // Ships a compiled profile in the APK, so focus moves are fast from the first start. See baselineprofile/.
+    id("androidx.baselineprofile")
 }
 
 android {
@@ -53,6 +55,8 @@ dependencies {
     implementation("androidx.tv:tv-material:1.1.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    baselineProfile(project(":baselineprofile"))
 
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-hls:$media3")

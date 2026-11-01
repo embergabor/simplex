@@ -39,6 +39,7 @@ import com.ember.simpleplex.ui.applyTheme
 import com.ember.simpleplex.ui.FolderScreen
 import com.ember.simpleplex.ui.GridScreen
 import com.ember.simpleplex.ui.HomeScreen
+import com.ember.simpleplex.ui.Intro
 import com.ember.simpleplex.ui.KidsScreen
 import com.ember.simpleplex.ui.LocalRefresh
 import com.ember.simpleplex.ui.LocalRefreshBump
@@ -79,7 +80,10 @@ class MainActivity : ComponentActivity() {
                     LocalRefreshBump provides { refresh.intValue++ },
                     LocalBringIntoViewSpec provides PivotScroll.Default,
                 ) {
-                    Box(Modifier.fillMaxSize().background(Palette.Ground)) { App(plex) }
+                    Box(Modifier.fillMaxSize().background(Palette.Ground)) {
+                        App(plex)
+                        Intro()
+                    }
                 }
             }
         }

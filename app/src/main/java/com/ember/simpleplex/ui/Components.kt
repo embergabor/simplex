@@ -418,6 +418,9 @@ private fun ArtCard(
                 rotationY = tiltY.value
                 cameraDistance = 12f * density
                 shadowElevation = 18.dp.toPx() * lift.value.coerceIn(0f, 1f)
+                // A light glow in dark mode, where a shadow vanishes (Android 9+; older TVs keep the shadow).
+                ambientShadowColor = Palette.Shadow
+                spotShadowColor = Palette.Shadow
                 shape = cardShape
                 clip = true
             }
@@ -601,6 +604,7 @@ fun PillButton(
     icon: ImageVector? = null,
     selected: Boolean = false,
     onLongClick: (() -> Unit)? = null,
+    accent: Color? = null,
 ) {
     Button(
         onClick = onClick,
@@ -609,8 +613,8 @@ fun PillButton(
         shape = ButtonDefaults.shape(RoundedCornerShape(8.dp)),
         scale = ButtonDefaults.scale(focusedScale = 1.04f),
         colors = ButtonDefaults.colors(
-            containerColor = Palette.Control,
-            contentColor = Palette.Ink,
+            containerColor = accent ?: Palette.Control,
+            contentColor = if (accent != null) Palette.Light.ink else Palette.Ink,
             focusedContainerColor = Palette.Ink,
             focusedContentColor = Palette.OnInk,
         ),

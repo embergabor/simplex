@@ -1,6 +1,8 @@
 package com.ember.simpleplex.ui
 
 import android.content.Context
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
@@ -38,10 +40,12 @@ class ThemePrefs(context: Context) {
 
 /** Sets [Palette.current] from the saved mode, before anything is drawn. */
 fun applyTheme(context: Context) {
-    val prefs = ThemePrefs(context)
-    Palette.mode = prefs.mode
-    Palette.current = if (isDark(prefs.mode, prefs.place, Instant.now(), ZoneId.systemDefault())) Palette.Dark else Palette.Light
+    Palette.mode = ThemePrefs(context).mode
+    Palette.current = colorsFor(ThemePrefs(context), Palette.mode)
 }
+
+private fun colorsFor(prefs: ThemePrefs, mode: ThemeMode) =
+    if (isDark(mode, prefs.place, Instant.now(), ZoneId.systemDefault())) Palette.Dark else Palette.Light
 
 /** Keeps the palette in step with [Palette.mode]. Auto looks up the place once and follows the sun. */
 @Composable
@@ -59,7 +63,13 @@ fun FollowTheme(plex: PlexClient) {
             }.getOrNull()
         }
         while (true) {
-            applyTheme(context)
+            val target = colorsFor(prefs, mode)
+            if (target !== Palette.current) {
+                // ponytail: every screen recomposes on each frame of the fade; it happens twice a day at most.
+                val from = Palette.current
+                animate(0f, 1f, animationSpec = tween(400)) { t, _ -> Palette.current = from.lerp(target, t) }
+                Palette.current = target
+            }
             if (mode != ThemeMode.Auto) break
             // ponytail: checks once a minute rather than sleeping until the next sunrise or sunset;
             // also covers a TV that slept through the switch. Costs a few trig calls.

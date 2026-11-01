@@ -3,6 +3,22 @@
 package com.ember.simpleplex.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,6 +63,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
@@ -69,11 +86,12 @@ fun TopMenu(current: Screen, nav: Nav, modifier: Modifier = Modifier) {
         PillButton("Home", { nav.push(Screen.Home) }, selected = current == Screen.Home)
         PillButton("PlexVerse", { nav.push(Screen.PlexVerse) }, selected = current == Screen.PlexVerse)
         if (setup.isSetUp && setup.kidsSeparate) {
-            PillButton("Kids", { nav.push(Screen.Kids) }, selected = current == Screen.Kids)
+            PillButton("Kids", { nav.push(Screen.Kids) }, icon = Icons.Smile, selected = current == Screen.Kids, accent = Palette.Kids)
         }
         Spacer(Modifier.weight(1f))
         // Each OK moves to the next mode; picking Auto looks up the place again.
-        PillButton(Palette.mode.name, {
+        val icon = when (Palette.mode) { ThemeMode.Light -> Icons.Sun; ThemeMode.Dark -> Icons.Moon; ThemeMode.Auto -> Icons.Sunset }
+        IconPillButton(icon, "Theme: ${Palette.mode.name}", {
             val next = ThemeMode.entries[(Palette.mode.ordinal + 1) % ThemeMode.entries.size]
             if (next == ThemeMode.Auto) ThemePrefs(context).place = null
             Palette.mode = next
@@ -167,6 +185,7 @@ private fun PrefetchPanel(plex: PlexClient, states: Map<String, ServerState>, on
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         SectionTitle("Getting the lists from your servers")
+        Orbits(states.values.toList(), Modifier.align(Alignment.CenterHorizontally).size(360.dp, 200.dp))
         ServersBar(states.values.count { it != ServerState.Waiting }, states.size.coerceAtLeast(1))
         for ((id, state) in states) {
             val line = when (state) {
@@ -180,12 +199,60 @@ private fun PrefetchPanel(plex: PlexClient, states: Map<String, ServerState>, on
     }
 }
 
-/** "Updating · 3/5 servers" while a refresh runs; nothing otherwise. */
+/**
+ * The TV with each server circling it as a Plex chevron, a planet on one of three tilted orbits.
+ * Waiting servers pulse, answered ones shine, failed ones turn grey. Planets pass behind the TV.
+ */
+@Composable
+private fun Orbits(states: List<ServerState>, modifier: Modifier, tv: Dp = 72.dp, planet: Dp = 9.dp) {
+    val spin = rememberInfiniteTransition(label = "orbits")
+    val turn by spin.animateFloat(0f, 1f, infiniteRepeatable(tween(9000, easing = LinearEasing)), label = "turn")
+    val pulse by spin.animateFloat(0.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "pulse")
+    val tvIcon = rememberVectorPainter(Icons.Tv)
+    val ink = Palette.Ink
+    val ring = Palette.Divider
+    val failed = Palette.Secondary
+    Canvas(modifier) {
+        val rings = (0 until minOf(3, states.size.coerceAtLeast(1)))
+        fun radii(r: Int) = Size(size.width * (0.26f + 0.11f * r), size.height * (0.17f + 0.08f * r))
+        for (r in rings) {
+            val (rx, ry) = radii(r)
+            drawOval(ring, topLeft = center - Offset(rx, ry), size = Size(2 * rx, 2 * ry), style = Stroke(1.dp.toPx()))
+        }
+        // Inner orbits turn faster, like planets. Index spreads servers on the same ring apart.
+        val planets = states.mapIndexed { i, state ->
+            val r = i % 3
+            val (rx, ry) = radii(r)
+            val a = 2 * PI.toFloat() * (turn * (3 - r) + i / states.size.toFloat())
+            Triple(center + Offset(cos(a) * rx, sin(a) * ry), sin(a), state)
+        }
+        fun planet(at: Offset, depth: Float, state: ServerState) {
+            val s = planet.toPx() * (1 + depth / 3) // nearer is bigger
+            val (color, alpha) = when (state) {
+                ServerState.Waiting -> Palette.Plex to pulse
+                is ServerState.Done -> Palette.Plex to 1f
+                is ServerState.Failed -> failed to 0.6f
+            }
+            drawChevron(at, s, color, alpha)
+        }
+        planets.filter { it.second < 0 }.forEach { planet(it.first, it.second, it.third) }
+        val tvSize = Size(tv.toPx(), tv.toPx())
+        translate(center.x - tvSize.width / 2, center.y - tvSize.height / 2) {
+            with(tvIcon) { draw(tvSize, colorFilter = ColorFilter.tint(ink)) }
+        }
+        planets.filter { it.second >= 0 }.forEach { planet(it.first, it.second, it.third) }
+    }
+}
+
+/** "Updating · 3/5 servers" with small orbits while a refresh runs; nothing otherwise. */
 @Composable
 fun UpdatingBar(states: Map<String, ServerState>, modifier: Modifier = Modifier.padding(horizontal = 48.dp)) {
     val done = states.values.count { it != ServerState.Waiting }
     if (done == states.size) return
-    Text("Updating · $done/${states.size} servers", modifier, fontSize = 11.sp, color = Palette.Secondary)
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Orbits(states.values.toList(), Modifier.size(52.dp, 26.dp), tv = 12.dp, planet = 2.5.dp)
+        Text("Updating · $done/${states.size} servers", fontSize = 11.sp, color = Palette.Secondary)
+    }
 }
 
 /**
