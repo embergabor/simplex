@@ -31,7 +31,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -82,6 +86,7 @@ import androidx.media3.ui.SubtitleView
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
+import com.ember.simpleplex.plex.Chapter
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Marker
 import com.ember.simpleplex.plex.Stream
@@ -89,6 +94,7 @@ import com.ember.simpleplex.ui.Icons
 import com.ember.simpleplex.ui.Palette
 import com.ember.simpleplex.ui.IconPillButton
 import com.ember.simpleplex.ui.PillButton
+import com.ember.simpleplex.ui.WideCard
 import com.ember.simpleplex.ui.formatDuration
 import kotlinx.coroutines.delay
 
@@ -122,8 +128,13 @@ fun PlayerScreen(
     onAnswer: (Boolean) -> Unit,
     /** Waiting on Plex (the video's details, a conversion starting) before the player has anything to load. */
     preparing: Boolean,
+    /** A chapter's thumbnail path as an image address. */
+    chapterImage: (String?) -> String?,
 ) {
     var visible by remember { mutableStateOf(true) }
+    // Down from the play controls opens the file's chapters under them; closed with the controls.
+    var chaptersOpen by remember(item) { mutableStateOf(false) }
+    LaunchedEffect(visible) { if (!visible) chaptersOpen = false }
     var lastInput by remember { mutableLongStateOf(0L) }
     var isPlaying by remember { mutableStateOf(player.isPlaying) }
     var buffering by remember { mutableStateOf(player.playbackState == Player.STATE_BUFFERING) }
@@ -249,7 +260,11 @@ fun PlayerScreen(
                 // one level per press: the first press closes the controls, the next one stops playback.
                 if (e.key == Key.Back) {
                     if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 0) {
-                        if (visible && item != null && error == null) visible = false else onExit()
+                        if (chaptersOpen) {
+                            // Chapters first: back to the progress bar, controls still open.
+                            chaptersOpen = false
+                            runCatching { scrub.requestFocus() }
+                        } else if (visible && item != null && error == null) visible = false else onExit()
                     }
                     return@onPreviewKeyEvent true
                 }
@@ -365,6 +380,15 @@ fun PlayerScreen(
                     }
                 },
                 onLeaveBar = ::cancelScrub,
+                chaptersOpen = chaptersOpen,
+                onChaptersOpen = { chaptersOpen = it },
+                chapterImage = chapterImage,
+                onChapter = { c ->
+                    cancelScrub()
+                    seekTo(c.start)
+                    runCatching { scrub.requestFocus() }
+                    chaptersOpen = false
+                },
             )
         }
     }
@@ -396,6 +420,10 @@ private fun Controls(
     onPick: (Int) -> Unit,
     onKey: (KeyEvent) -> Boolean,
     onLeaveBar: () -> Unit,
+    chaptersOpen: Boolean,
+    onChaptersOpen: (Boolean) -> Unit,
+    chapterImage: (String?) -> String?,
+    onChapter: (Chapter) -> Unit,
 ) {
     var pos by remember { mutableLongStateOf(position()) }
     LaunchedEffect(item) {
@@ -474,7 +502,16 @@ private fun Controls(
                 }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        val chapters = item.chapters
+        Row(
+            Modifier.onPreviewKeyEvent { e ->
+                // Down from the play controls opens the chapters; there's nothing else below them.
+                val open = chapters.isNotEmpty() && !chaptersOpen && e.key == Key.DirectionDown && e.type == KeyEventType.KeyDown
+                if (open) onChaptersOpen(true)
+                open
+            },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(formatDuration(shown), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Palette.Secondary)
             // Previous/next episode around play/pause; movies and home videos get play/pause alone.
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally)) {
@@ -484,6 +521,52 @@ private fun Controls(
             }
             Text("−" + formatDuration((duration - shown).coerceAtLeast(0)), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Palette.Secondary)
         }
+        if (chapters.isNotEmpty()) {
+            if (chaptersOpen) ChapterRow(chapters, shown, chapterImage, onChapter, onClose = { onChaptersOpen(false) })
+            else Text("▾  Chapters", Modifier.align(Alignment.CenterHorizontally), fontSize = 10.sp, color = Palette.Secondary)
+        }
+    }
+}
+
+/**
+ * The file's chapters, opening on the one playing (its card shows how far into it), with Plex's
+ * thumbnail, the title (or "Chapter 3" when the file has none) and where it starts. OK jumps there.
+ * Moving up out of the row closes it.
+ */
+@Composable
+private fun ChapterRow(
+    chapters: List<Chapter>,
+    position: Long,
+    chapterImage: (String?) -> String?,
+    onChapter: (Chapter) -> Unit,
+    onClose: () -> Unit,
+) {
+    val current = chapters.indexOfLast { it.start <= position }.coerceAtLeast(0)
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = (current - 1).coerceAtLeast(0))
+    val focusCurrent = remember { FocusRequester() }
+    var entered by remember { mutableStateOf(false) }
+    LazyRow(
+        state = state,
+        modifier = Modifier.onFocusChanged { if (it.hasFocus) entered = true else if (entered) onClose() },
+        contentPadding = PaddingValues(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        itemsIndexed(chapters, key = { i, _ -> i }) { i, c ->
+            WideCard(
+                imageUrl = chapterImage(c.thumb),
+                title = c.label,
+                subtitle = formatDuration(c.start),
+                progress = if (i == current && c.end > c.start) ((position - c.start).toFloat() / (c.end - c.start)).coerceIn(0f, 1f) else 0f,
+                watched = false,
+                onClick = { onChapter(c) },
+                width = 168.dp,
+                modifier = if (i == current) Modifier.focusRequester(focusCurrent) else Modifier,
+            )
+        }
+    }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        runCatching { focusCurrent.requestFocus() }
     }
 }
 

@@ -189,6 +189,7 @@ class PlayerActivity : ComponentActivity() {
                     question = question.value,
                     onAnswer = { useCompat -> answer?.invoke(useCompat) },
                     preparing = preparing.value,
+                    chapterImage = { plex.image(it, 336, 189) },
                 )
             }
         }

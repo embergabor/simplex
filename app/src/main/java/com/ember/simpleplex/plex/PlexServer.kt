@@ -110,9 +110,9 @@ class PlexServer(uri: String, val token: String, val machineId: String?, private
         if (saved != on) throw IOException("Plex didn't keep the change")
     }
 
-    /** Full metadata including streams and intro/credits markers, needed before playback. */
+    /** Full metadata including streams, intro/credits markers and chapters, needed before playback. */
     suspend fun metadata(ratingKey: String): Item {
-        val mc = get("/library/metadata/$ratingKey?includeMarkers=1")
+        val mc = get("/library/metadata/$ratingKey?includeMarkers=1&includeChapters=1")
         val item = mc.items().first()
         return if (item.librarySectionId == null) item.copy(librarySectionId = mc.str("librarySectionID")) else item
     }

@@ -37,6 +37,8 @@ data class Item(
     val titleSort: String = title,
     /** Plex's intro and credits markers; only in full metadata. */
     val markers: List<Marker> = emptyList(),
+    /** The file's own chapters, as Plex lists them; only in full metadata. */
+    val chapters: List<Chapter> = emptyList(),
     /** Plex's own guid and the agents' ids (imdb://, tmdb://, tvdb://), for matching across servers. */
     val guids: List<String> = emptyList(),
     /** When it was last watched, in seconds; 0 if never. */
@@ -63,6 +65,11 @@ data class Media(val parts: List<Part>)
 data class Marker(val type: String, val start: Long, val end: Long, val final: Boolean = false) {
     val isIntro get() = type == "intro"
     val isCredits get() = type == "credits"
+}
+
+/** A chapter from the file. [title] is null when the file has none; [thumb] is Plex's frame for it. Times in ms. */
+data class Chapter(val index: Int, val start: Long, val end: Long, val title: String? = null, val thumb: String? = null) {
+    val label get() = title ?: "Chapter $index"
 }
 
 data class Part(
@@ -191,6 +198,15 @@ internal fun parseItem(o: JSONObject) = Item(
     markers = o.optJSONArray("Marker").objects().mapNotNull { m ->
         Marker(m.str("type") ?: return@mapNotNull null, m.long("startTimeOffset") ?: return@mapNotNull null, m.long("endTimeOffset") ?: return@mapNotNull null, m.bool("final"))
     },
+    chapters = o.optJSONArray("Chapter").objects().mapIndexedNotNull { i, c ->
+        Chapter(
+            index = c.int("index") ?: (i + 1),
+            start = c.long("startTimeOffset") ?: return@mapIndexedNotNull null,
+            end = c.long("endTimeOffset") ?: return@mapIndexedNotNull null,
+            title = c.str("tag")?.takeIf { it.isNotBlank() },
+            thumb = c.str("thumb"),
+        )
+    }.sortedBy { it.start },
     guids = listOfNotNull(o.str("guid")) + o.optJSONArray("Guid").objects().mapNotNull { it.str("id") },
     lastViewedAt = o.long("lastViewedAt") ?: 0,
     media = o.optJSONArray("Media").objects().map { m ->
