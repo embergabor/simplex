@@ -1,8 +1,24 @@
-@file:OptIn(ExperimentalTvMaterial3Api::class)
+@file:OptIn(ExperimentalTvMaterial3Api::class, ExperimentalFoundationApi::class)
 
 package com.ember.simpleplex.ui
 
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import coil3.SingletonImageLoader
+import coil3.request.ImageRequest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -134,6 +150,63 @@ fun Modifier.remembersFocus(memory: FocusMemory, key: String, default: Boolean =
         .onFocusChanged { if (it.isFocused) memory.focused(key) }
 }
 
+// --- Scrolling ---
+
+/**
+ * How lists scroll to the focused item: it stays at a fixed spot (the pivot) and the content moves
+ * under it, the way tvOS does it. A firm spring for single presses; while a direction key repeats,
+ * the scroll jumps, so the list keeps up with the focus instead of trailing behind it.
+ */
+class PivotScroll(private val pivot: (containerSize: Float) -> Float) : BringIntoViewSpec {
+    // Deprecated, but Compose 1.12 still reads it each time a scroll animation starts.
+    @Deprecated("Animation spec customization is no longer supported.")
+    override val scrollAnimationSpec: AnimationSpec<Float>
+        get() = if (repeating) snap() else spring(stiffness = Spring.StiffnessMediumLow)
+
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
+        offset - pivot(containerSize).coerceAtMost(containerSize - size).coerceAtLeast(0f)
+
+    companion object {
+        /** Set by MainActivity while a key is held down and repeating. */
+        var repeating = false
+
+        /** Grids and columns: the focused item about a third of the way down. */
+        val Default = PivotScroll { it / 3f }
+    }
+}
+
+/** Around a LazyRow: the focused card stays at the row's start, right after its [start] padding. */
+@Composable
+fun PinnedRow(start: Dp = 48.dp, content: @Composable () -> Unit) {
+    val px = with(LocalDensity.current) { start.toPx() }
+    val spec = remember(px) { PivotScroll { px } }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
+}
+
+/**
+ * Loads the images of the rows after the next one into Coil's memory cache as the grid scrolls, so
+ * fast scrolling shows posters instead of empty tiles. The grid already composes one row ahead
+ * itself, so that row is skipped rather than requested twice. [url] gets the grid's item index.
+ */
+@Composable
+fun PreloadImages(state: LazyGridState, vararg keys: Any?, rows: Int = 3, url: (index: Int) -> String?) {
+    val context = LocalContext.current
+    val currentUrl by rememberUpdatedState(url)
+    LaunchedEffect(state, *keys) {
+        val loader = SingletonImageLoader.get(context)
+        var reached = -1
+        snapshotFlow { state.layoutInfo.run { (visibleItemsInfo.lastOrNull()?.index ?: -1) to maxSpan } }
+            .collect { (last, span) ->
+                if (last < 0) return@collect
+                val until = last + rows * span
+                for (i in maxOf(reached + 1, last + span + 1)..until) {
+                    currentUrl(i)?.let { loader.enqueue(ImageRequest.Builder(context).data(it).build()) }
+                }
+                reached = maxOf(reached, until)
+            }
+    }
+}
+
 // --- Text ---
 
 @Composable
@@ -215,13 +288,16 @@ private fun BoxScope.InsetRing() {
 
 @Composable
 private fun Artwork(url: String?, fallback: String) {
+    // The title only stands in when there's no image at all: while one loads, the plain tile looks
+    // calmer than text that flickers and then gets replaced.
     Box(Modifier.fillMaxSize().background(Palette.Placeholder), contentAlignment = Alignment.Center) {
-        Text(
-            fallback, modifier = Modifier.padding(10.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-            color = Palette.Secondary, textAlign = TextAlign.Center, maxLines = 3,
-        )
         if (url != null) {
             AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else {
+            Text(
+                fallback, modifier = Modifier.padding(10.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                color = Palette.Secondary, textAlign = TextAlign.Center, maxLines = 3,
+            )
         }
     }
 }

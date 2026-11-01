@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -117,24 +118,26 @@ private fun ContinueRow(plex: PlexClient, store: VerseStore, kids: Boolean, nav:
     if (row.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
-        LazyRow(
-            state = rowState,
-            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            items(row, key = { it.sources.first().ref }) { c ->
-                val item = c.item
-                WideCard(
-                    imageUrl = connected[c.sources.first().machineId]?.image(if (item.isEpisode) item.thumb else item.art ?: item.thumb, 480, 270),
-                    title = if (item.isEpisode) item.grandparentTitle ?: item.title else item.title,
-                    subtitle = if (item.isEpisode) "${item.episodeLabel} · ${item.title}" else if (item.viewOffset > 0) timeLeft(item) else null,
-                    progress = item.progress,
-                    watched = false,
-                    onClick = { nav.play(listOf(c.sources.joinToString(",") { it.ref })) },
-                    onLongClick = if (kids) null else ({ menuFor = c }),
-                    width = 200.dp,
-                    modifier = Modifier.remembersFocus(memory, "c" + c.sources.first().ref, default = c == row.first()),
-                )
+        PinnedRow {
+            LazyRow(
+                state = rowState,
+                contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                items(row, key = { it.sources.first().ref }) { c ->
+                    val item = c.item
+                    WideCard(
+                        imageUrl = connected[c.sources.first().machineId]?.image(if (item.isEpisode) item.thumb else item.art ?: item.thumb, 400, 225),
+                        title = if (item.isEpisode) item.grandparentTitle ?: item.title else item.title,
+                        subtitle = if (item.isEpisode) "${item.episodeLabel} · ${item.title}" else if (item.viewOffset > 0) timeLeft(item) else null,
+                        progress = item.progress,
+                        watched = false,
+                        onClick = { nav.play(listOf(c.sources.joinToString(",") { it.ref })) },
+                        onLongClick = if (kids) null else ({ menuFor = c }),
+                        width = 200.dp,
+                        modifier = Modifier.remembersFocus(memory, "c" + c.sources.first().ref, default = c == row.first()),
+                    )
+                }
             }
         }
     }
@@ -196,8 +199,17 @@ fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
         else -> "Movies"
     }
     var menuFor by remember { mutableStateOf<VerseEntry?>(null) }
+    val grid = rememberLazyGridState()
+    // The poster from the first source whose server has answered.
+    val poster: (VerseEntry) -> String? = { entry ->
+        entry.sources.firstOrNull { it.machineId in connected }?.let { connected[it.machineId]?.image(it.item.thumb, 248, 372) }
+    }
+    // Before the posters: the title, and on Kids the top menu with Continue watching.
+    val headers = if (kids) 2 else 1
+    PreloadImages(grid, entries, connected) { i -> entries.getOrNull(i - headers)?.let(poster) }
 
     LazyVerticalGrid(
+        state = grid,
         columns = GridCells.Fixed(if (kids) 5 else 6),
         contentPadding = PaddingValues(horizontal = 48.dp, vertical = if (kids) 36.dp else 40.dp),
         horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -228,11 +240,9 @@ fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
             }
         }
         items(entries, key = { it.key }) { entry ->
-            // The poster from the first source whose server has answered.
-            val shown = entry.sources.firstOrNull { it.machineId in connected }
             PosterCard(
                 title = entry.item.title,
-                imageUrl = shown?.let { connected[it.machineId]?.image(it.item.thumb, 248, 372) },
+                imageUrl = poster(entry),
                 progress = entry.item.progress,
                 watched = entry.item.watched,
                 badge = if (entry.sources.size > 1) "×${entry.sources.size}" else null,

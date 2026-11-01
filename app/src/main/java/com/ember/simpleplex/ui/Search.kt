@@ -345,22 +345,25 @@ private fun LazyGridScope.results(plex: PlexServer, nav: Nav, f: Found, onMenu: 
         item(span = { GridItemSpan(maxLineSpan) }, key = lib.key + "/s" + episodes.first().grandparentRatingKey) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SectionTitle("$show · ${episodes.size} episode${if (episodes.size == 1) "" else "s"}")
-                LazyRow(
-                    contentPadding = PaddingValues(vertical = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                ) {
-                    rowItems(episodes, key = { it.ratingKey }) { ep ->
-                        WideCard(
-                            imageUrl = plex.image(ep.thumb, 352, 198),
-                            title = ep.title,
-                            subtitle = ep.episodeLabel,
-                            subtitleFirst = true,
-                            progress = ep.progress,
-                            watched = ep.watched,
-                            onClick = { nav.play(listOf(ep.ratingKey)) },
-                            onLongClick = { onMenu(ep) },
-                            width = 176.dp,
-                        )
+                // The row has no side padding: a little room so the focused card's grown edge isn't cut off.
+                PinnedRow(start = 8.dp) {
+                    LazyRow(
+                        contentPadding = PaddingValues(vertical = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    ) {
+                        rowItems(episodes, key = { it.ratingKey }) { ep ->
+                            WideCard(
+                                imageUrl = plex.image(ep.thumb, 352, 198),
+                                title = ep.title,
+                                subtitle = ep.episodeLabel,
+                                subtitleFirst = true,
+                                progress = ep.progress,
+                                watched = ep.watched,
+                                onClick = { nav.play(listOf(ep.ratingKey)) },
+                                onLongClick = { onMenu(ep) },
+                                width = 176.dp,
+                            )
+                        }
                     }
                 }
             }

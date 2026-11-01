@@ -2,10 +2,13 @@ package com.ember.simpleplex
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -31,6 +34,7 @@ import com.ember.simpleplex.ui.LocalRefresh
 import com.ember.simpleplex.ui.LocalRefreshBump
 import com.ember.simpleplex.ui.Nav
 import com.ember.simpleplex.ui.Palette
+import com.ember.simpleplex.ui.PivotScroll
 import com.ember.simpleplex.ui.PlexVerseScreen
 import com.ember.simpleplex.ui.PlexVerseSetupScreen
 import com.ember.simpleplex.ui.Screen
@@ -49,6 +53,7 @@ class MainActivity : ComponentActivity() {
     private val refresh = mutableIntStateOf(0)
     private var started = false
 
+    @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val plex = PlexClient.get(this)
@@ -57,11 +62,17 @@ class MainActivity : ComponentActivity() {
                 CompositionLocalProvider(
                     LocalRefresh provides refresh.intValue,
                     LocalRefreshBump provides { refresh.intValue++ },
+                    LocalBringIntoViewSpec provides PivotScroll.Default,
                 ) {
                     Box(Modifier.fillMaxSize().background(Palette.Ground)) { App(plex) }
                 }
             }
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        PivotScroll.repeating = event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onResume() {

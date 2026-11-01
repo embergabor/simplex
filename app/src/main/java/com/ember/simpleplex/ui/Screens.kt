@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.heightIn
@@ -171,22 +172,24 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
         if (continuing.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                ) {
-                    items(continuing, key = { it.ratingKey }) { item ->
-                        WideCard(
-                            imageUrl = plex.image(if (item.isEpisode) item.thumb else item.art ?: item.thumb, 480, 270),
-                            title = if (item.isEpisode) item.grandparentTitle ?: item.title else item.title,
-                            subtitle = if (item.isEpisode) "${item.episodeLabel} · ${item.title}" else if (item.viewOffset > 0) timeLeft(item) else null,
-                            progress = item.progress,
-                            watched = false,
-                            onClick = { nav.play(listOf(item.ratingKey)) },
-                            onLongClick = { menuFor = item },
-                            width = 200.dp,
-                            modifier = Modifier.remembersFocus(memory, "c" + item.ratingKey, default = item == continuing.first()),
-                        )
+                PinnedRow {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    ) {
+                        items(continuing, key = { it.ratingKey }) { item ->
+                            WideCard(
+                                imageUrl = plex.image(if (item.isEpisode) item.thumb else item.art ?: item.thumb, 400, 225),
+                                title = if (item.isEpisode) item.grandparentTitle ?: item.title else item.title,
+                                subtitle = if (item.isEpisode) "${item.episodeLabel} · ${item.title}" else if (item.viewOffset > 0) timeLeft(item) else null,
+                                progress = item.progress,
+                                watched = false,
+                                onClick = { nav.play(listOf(item.ratingKey)) },
+                                onLongClick = { menuFor = item },
+                                width = 200.dp,
+                                modifier = Modifier.remembersFocus(memory, "c" + item.ratingKey, default = item == continuing.first()),
+                            )
+                        }
                     }
                 }
             }
@@ -197,32 +200,34 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
         )
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SectionTitle("Libraries", Modifier.padding(horizontal = 48.dp))
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-            ) {
-                itemsIndexed(libraries, key = { _, lib -> lib.key }) { i, lib ->
-                    IconTile(
-                        icon = when (lib.kind) {
-                            Library.Kind.MOVIES -> Icons.Film
-                            Library.Kind.SHOWS -> Icons.Tv
-                            Library.Kind.OTHER -> Icons.Folder
-                        },
-                        label = lib.title,
-                        onClick = {
-                            nav.push(if (lib.kind == Library.Kind.OTHER) Screen.Folder(lib, null, emptyList()) else Screen.Grid(lib))
-                        },
-                        modifier = Modifier.size(180.dp, 108.dp)
-                            .remembersFocus(memory, "l" + lib.key, default = continuing.isEmpty() && i == 0),
-                    )
-                }
-                item(key = "edit") {
-                    IconTile(
-                        icon = Icons.Edit,
-                        label = "Edit",
-                        onClick = { editing = true },
-                        modifier = Modifier.size(108.dp, 108.dp).remembersFocus(memory, "edit", default = allLibraries.isEmpty()),
-                    )
+            PinnedRow {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                ) {
+                    itemsIndexed(libraries, key = { _, lib -> lib.key }) { i, lib ->
+                        IconTile(
+                            icon = when (lib.kind) {
+                                Library.Kind.MOVIES -> Icons.Film
+                                Library.Kind.SHOWS -> Icons.Tv
+                                Library.Kind.OTHER -> Icons.Folder
+                            },
+                            label = lib.title,
+                            onClick = {
+                                nav.push(if (lib.kind == Library.Kind.OTHER) Screen.Folder(lib, null, emptyList()) else Screen.Grid(lib))
+                            },
+                            modifier = Modifier.size(180.dp, 108.dp)
+                                .remembersFocus(memory, "l" + lib.key, default = continuing.isEmpty() && i == 0),
+                        )
+                    }
+                    item(key = "edit") {
+                        IconTile(
+                            icon = Icons.Edit,
+                            label = "Edit",
+                            onClick = { editing = true },
+                            modifier = Modifier.size(108.dp, 108.dp).remembersFocus(memory, "edit", default = allLibraries.isEmpty()),
+                        )
+                    }
                 }
             }
         }
@@ -275,8 +280,12 @@ fun GridScreen(plex: PlexServer, library: Library, nav: Nav) {
     var menuFor by remember { mutableStateOf<Item?>(null) }
     val items = result?.getOrElse { return ErrorMessage("Couldn't load ${library.title}.\n${it.message}") } ?: return
     if (items.isEmpty()) return Message("${library.title} is empty.")
+    val grid = rememberLazyGridState()
+    // Index 0 is the title.
+    PreloadImages(grid, items) { i -> items.getOrNull(i - 1)?.let { plex.image(it.thumb, 248, 372) } }
 
     LazyVerticalGrid(
+        state = grid,
         columns = GridCells.Fixed(6),
         contentPadding = PaddingValues(horizontal = 48.dp, vertical = 40.dp),
         horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -404,23 +413,25 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
             item(key = "favorites") {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     SectionTitle("Favorites", Modifier.padding(horizontal = 48.dp))
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    ) {
-                        itemsIndexed(favorites, key = { _, ep -> ep.key }) { i, ep ->
-                            WideCard(
-                                imageUrl = ep.server.image(ep.item.thumb, 352, 198),
-                                title = ep.item.title,
-                                subtitle = ep.item.episodeLabel,
-                                subtitleFirst = true,
-                                progress = ep.item.progress,
-                                watched = ep.item.watched,
-                                onClick = { nav.play(favorites.map { it.entry }, startAt = i, keepQueue = true) },
-                                onLongClick = { menuFor = ep },
-                                width = 176.dp,
-                                modifier = Modifier.remembersFocus(memory, "fav" + ep.key),
-                            )
+                    PinnedRow {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(20.dp),
+                        ) {
+                            itemsIndexed(favorites, key = { _, ep -> ep.key }) { i, ep ->
+                                WideCard(
+                                    imageUrl = ep.server.image(ep.item.thumb, 352, 198),
+                                    title = ep.item.title,
+                                    subtitle = ep.item.episodeLabel,
+                                    subtitleFirst = true,
+                                    progress = ep.item.progress,
+                                    watched = ep.item.watched,
+                                    onClick = { nav.play(favorites.map { it.entry }, startAt = i, keepQueue = true) },
+                                    onLongClick = { menuFor = ep },
+                                    width = 176.dp,
+                                    modifier = Modifier.remembersFocus(memory, "fav" + ep.key),
+                                )
+                            }
                         }
                     }
                 }
@@ -433,23 +444,25 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
                         Box(Modifier.padding(horizontal = 48.dp).padding(bottom = 16.dp).fillMaxWidth().height(1.dp).background(Palette.Divider))
                     }
                     SectionTitle(if (number == 0) "Specials" else "Season $number", Modifier.padding(horizontal = 48.dp))
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    ) {
-                        items(eps, key = { it.key }) { ep ->
-                            WideCard(
-                                imageUrl = ep.server.image(ep.item.thumb, 352, 198),
-                                title = ep.item.title,
-                                subtitle = "Episode ${ep.item.index ?: ""}",
-                                subtitleFirst = true,
-                                progress = ep.item.progress,
-                                watched = ep.item.watched,
-                                onClick = { playFrom(episodes.indexOf(ep)) },
-                                onLongClick = { menuFor = ep },
-                                width = 176.dp,
-                                modifier = Modifier.remembersFocus(memory, ep.key),
-                            )
+                    PinnedRow {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(20.dp),
+                        ) {
+                            items(eps, key = { it.key }) { ep ->
+                                WideCard(
+                                    imageUrl = ep.server.image(ep.item.thumb, 352, 198),
+                                    title = ep.item.title,
+                                    subtitle = "Episode ${ep.item.index ?: ""}",
+                                    subtitleFirst = true,
+                                    progress = ep.item.progress,
+                                    watched = ep.item.watched,
+                                    onClick = { playFrom(episodes.indexOf(ep)) },
+                                    onLongClick = { menuFor = ep },
+                                    width = 176.dp,
+                                    modifier = Modifier.remembersFocus(memory, ep.key),
+                                )
+                            }
                         }
                     }
                 }
@@ -500,29 +513,31 @@ fun FolderScreen(plex: PlexServer, library: Library, key: String?, path: List<St
             item(span = { GridItemSpan(maxLineSpan) }, key = "favorites") {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     SectionTitle("Favorites")
-                    LazyRow(
-                        // Bleeds to the screen edges, so cards scroll past the grid's margins.
-                        modifier = Modifier.layout { measurable, constraints ->
-                            val bleed = 48.dp.roundToPx()
-                            val p = measurable.measure(constraints.copy(maxWidth = constraints.maxWidth + 2 * bleed))
-                            layout(constraints.maxWidth, p.height) { p.place(-bleed, 0) }
-                        },
-                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(24.dp),
-                    ) {
-                        itemsIndexed(favoritesRow, key = { _, v -> v.ratingKey }) { i, v ->
-                            WideCard(
-                                imageUrl = plex.image(v.thumb, 396, 223),
-                                title = v.title,
-                                subtitle = null,
-                                badge = if (v.duration > 0) formatDuration(v.duration) else null,
-                                progress = v.progress,
-                                watched = v.watched,
-                                onClick = { nav.play(favoritesRow.map { plex.ref(it.ratingKey) }, startAt = i, keepQueue = true) },
-                                onLongClick = { menuFor = v },
-                                width = 198.dp,
-                                modifier = Modifier.remembersFocus(memory, "fav" + v.ratingKey, default = "fav" + v.ratingKey == firstKey),
-                            )
+                    PinnedRow {
+                        LazyRow(
+                            // Bleeds to the screen edges, so cards scroll past the grid's margins.
+                            modifier = Modifier.layout { measurable, constraints ->
+                                val bleed = 48.dp.roundToPx()
+                                val p = measurable.measure(constraints.copy(maxWidth = constraints.maxWidth + 2 * bleed))
+                                layout(constraints.maxWidth, p.height) { p.place(-bleed, 0) }
+                            },
+                            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(24.dp),
+                        ) {
+                            itemsIndexed(favoritesRow, key = { _, v -> v.ratingKey }) { i, v ->
+                                WideCard(
+                                    imageUrl = plex.image(v.thumb, 396, 223),
+                                    title = v.title,
+                                    subtitle = null,
+                                    badge = if (v.duration > 0) formatDuration(v.duration) else null,
+                                    progress = v.progress,
+                                    watched = v.watched,
+                                    onClick = { nav.play(favoritesRow.map { plex.ref(it.ratingKey) }, startAt = i, keepQueue = true) },
+                                    onLongClick = { menuFor = v },
+                                    width = 198.dp,
+                                    modifier = Modifier.remembersFocus(memory, "fav" + v.ratingKey, default = "fav" + v.ratingKey == firstKey),
+                                )
+                            }
                         }
                     }
                 }
