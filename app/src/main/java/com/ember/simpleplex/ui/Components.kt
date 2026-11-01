@@ -2,6 +2,33 @@
 
 package com.ember.simpleplex.ui
 
+import android.os.Build
+import android.view.WindowManager
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.focusable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.window.DialogWindowProvider
+import coil3.request.SuccessResult
+import coil3.request.crossfade
+import coil3.toBitmap
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filterNotNull
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -20,10 +47,8 @@ import androidx.compose.ui.unit.Dp
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -152,6 +177,15 @@ fun Modifier.remembersFocus(memory: FocusMemory, key: String, default: Boolean =
 
 // --- Scrolling ---
 
+/** The remote as MainActivity last saw it. */
+object RemoteKeys {
+    /** A key is held down and repeating. */
+    var repeating = false
+    /** The last direction pressed: -1, 0 or 1 across ([dx]) and down ([dy]). */
+    var dx = 0
+    var dy = 0
+}
+
 /**
  * How lists scroll to the focused item: it stays at a fixed spot (the pivot) and the content moves
  * under it, the way tvOS does it. A firm spring for single presses; while a direction key repeats,
@@ -161,15 +195,12 @@ class PivotScroll(private val pivot: (containerSize: Float) -> Float) : BringInt
     // Deprecated, but Compose 1.12 still reads it each time a scroll animation starts.
     @Deprecated("Animation spec customization is no longer supported.")
     override val scrollAnimationSpec: AnimationSpec<Float>
-        get() = if (repeating) snap() else spring(stiffness = Spring.StiffnessMediumLow)
+        get() = if (RemoteKeys.repeating) snap() else spring(stiffness = Spring.StiffnessMediumLow)
 
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
         offset - pivot(containerSize).coerceAtMost(containerSize - size).coerceAtLeast(0f)
 
     companion object {
-        /** Set by MainActivity while a key is held down and repeating. */
-        var repeating = false
-
         /** Grids and columns: the focused item about a third of the way down. */
         val Default = PivotScroll { it / 3f }
     }
@@ -261,29 +292,40 @@ fun ErrorMessage(text: String, modifier: Modifier = Modifier.fillMaxSize()) {
 
 private val cardShape = RoundedCornerShape(8.dp)
 
-private const val FOCUSED_SCALE = 1.08f
+private const val FOCUSED_SCALE = 1.10f
+
+/** The focus lift (0 to 1): a spring that settles with a small overshoot, like tvOS. */
+@Composable
+private fun animateLift(focused: Boolean): State<Float> =
+    animateFloatAsState(if (focused) 1f else 0f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium), label = "lift")
 
 /**
- * A focused poster or thumbnail grows (the card's own scale) and the title underneath slides down by
- * as much as the card's bottom edge moves, so it stays readable. Only the title is moved here: a
- * transform around the card itself also changes the box the lists scroll into view, and the rows then
- * chase every frame of the animation.
+ * The title under a lifted card slides down by as much as the card's bottom edge moves, so it stays
+ * readable. Both follow the same [lift].
+ */
+private fun Modifier.followCard(lift: State<Float>, cardHeight: Int): Modifier =
+    graphicsLayer { translationY = cardHeight * (FOCUSED_SCALE - 1f) * lift.value / 2f }
+
+/**
+ * OK clicks; holding OK (its first repeat) is a long click, as on tv-material's cards. Only a press
+ * that started here counts, so the release of a key pressed on the screen before doesn't click.
  */
 @Composable
-private fun Modifier.followCard(focused: Boolean, cardHeight: Int): Modifier {
-    val scale by animateFloatAsState(if (focused) FOCUSED_SCALE else 1f, label = "focus")
-    return graphicsLayer { translationY = cardHeight * (scale - 1f) / 2f }
-}
-
-/** Dark outer line for the grey background, white inner line for dark artwork. */
-@Composable
-private fun BoxScope.InsetRing() {
-    Box(
-        Modifier.matchParentSize()
-            .border(2.dp, Palette.Ink, cardShape)
-            .padding(2.dp)
-            .border(3.dp, Color.White, RoundedCornerShape(6.dp))
-    )
+private fun Modifier.okClick(onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier {
+    // 0: no press here, 1: pressed, 2: the press became a long click.
+    val press = remember { intArrayOf(0) }
+    return onKeyEvent { e ->
+        if (e.key !in okKeys) return@onKeyEvent false
+        val native = e.nativeKeyEvent
+        when (native.action) {
+            android.view.KeyEvent.ACTION_DOWN -> when (native.repeatCount) {
+                0 -> press[0] = 1
+                1 -> if (press[0] == 1 && onLongClick != null) { press[0] = 2; onLongClick() }
+            }
+            android.view.KeyEvent.ACTION_UP -> { if (press[0] == 1) onClick(); press[0] = 0 }
+        }
+        true
+    }
 }
 
 @Composable
@@ -292,7 +334,10 @@ private fun Artwork(url: String?, fallback: String) {
     // calmer than text that flickers and then gets replaced.
     Box(Modifier.fillMaxSize().background(Palette.Placeholder), contentAlignment = Alignment.Center) {
         if (url != null) {
-            AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            val context = LocalContext.current
+            // A short fade for posters that load; ones already in memory show at once.
+            val request = remember(url) { ImageRequest.Builder(context).data(url).crossfade(150).build() }
+            AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else {
             Text(
                 fallback, modifier = Modifier.padding(10.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
@@ -316,6 +361,12 @@ private fun WatchedBadge(modifier: Modifier) {
     }
 }
 
+/**
+ * A poster or thumbnail. Focused, it lifts: it grows, casts a soft shadow, tilts a little towards the
+ * key that brought focus and springs back flat, and a faint shine sweeps across it once. All of it is
+ * drawn inside the focus target, so the box the lists scroll into view stays put. [backdrop] is shown
+ * behind the screen while it has focus (see [WithBackdrop]).
+ */
 @Composable
 private fun ArtCard(
     url: String?,
@@ -328,45 +379,88 @@ private fun ArtCard(
     onLongClick: (() -> Unit)?,
     interaction: MutableInteractionSource,
     focused: Boolean,
+    lift: State<Float>,
     onHeight: (Int) -> Unit,
     modifier: Modifier,
     cornerIcon: ImageVector? = null,
+    backdrop: String? = null,
 ) {
-    Card(
-        onClick = onClick,
-        onLongClick = onLongClick,
-        modifier = modifier.fillMaxWidth().aspectRatio(aspect).onSizeChanged { onHeight(it.height) },
-        shape = CardDefaults.shape(cardShape),
-        scale = CardDefaults.scale(focusedScale = FOCUSED_SCALE),
-        border = CardDefaults.border(focusedBorder = Border.None),
-        colors = CardDefaults.colors(containerColor = Palette.Placeholder),
-        interactionSource = interaction,
+    val tiltX = remember { Animatable(0f) }
+    val tiltY = remember { Animatable(0f) }
+    val shine = remember { Animatable(1f) }
+    val backdropState = LocalBackdrop.current
+    LaunchedEffect(focused) {
+        if (!focused) return@LaunchedEffect
+        if (backdrop != null) backdropState?.value = backdrop
+        // Leans away from the way focus came in (right: the right edge dips back), then settles flat.
+        tiltY.snapTo(RemoteKeys.dx * TILT)
+        tiltX.snapTo(-RemoteKeys.dy * TILT)
+        val back = spring<Float>(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow)
+        launch { tiltX.animateTo(0f, back) }
+        launch { tiltY.animateTo(0f, back) }
+        shine.snapTo(0f)
+        shine.animateTo(1f, tween(700))
+    }
+    val density = LocalDensity.current.density
+    Box(
+        modifier.fillMaxWidth().aspectRatio(aspect).onSizeChanged { onHeight(it.height) }
+            .okClick(onClick, onLongClick)
+            .focusable(interactionSource = interaction)
+            .semantics(mergeDescendants = true) {
+                onClick { onClick(); true }
+                onLongClick?.let { onLongClick { it(); true } }
+            }
+            .graphicsLayer {
+                val s = 1f + (FOCUSED_SCALE - 1f) * lift.value
+                scaleX = s
+                scaleY = s
+                rotationX = tiltX.value
+                rotationY = tiltY.value
+                cameraDistance = 12f * density
+                shadowElevation = 18.dp.toPx() * lift.value.coerceIn(0f, 1f)
+                shape = cardShape
+                clip = true
+            }
+            .drawWithContent {
+                drawContent()
+                val p = shine.value
+                if (focused && p < 1f) {
+                    // A diagonal band of light from the top left to the bottom right.
+                    val x = size.width * (3f * p - 1f)
+                    drawRect(
+                        Brush.linearGradient(
+                            0f to Color.Transparent, 0.5f to Color.White.copy(alpha = 0.15f), 1f to Color.Transparent,
+                            start = Offset(x - size.width * 0.35f, 0f), end = Offset(x + size.width * 0.35f, size.height),
+                        )
+                    )
+                }
+            },
     ) {
-        Box(Modifier.fillMaxSize()) {
-            Artwork(url, fallback)
-            if (progress > 0f) Progress(progress, Modifier.align(Alignment.BottomCenter).padding(horizontal = 10.dp, vertical = 9.dp).fillMaxWidth())
-            if (watched) WatchedBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
-            if (cornerIcon != null) {
-                Icon(
-                    cornerIcon, contentDescription = null, tint = Color.White,
-                    modifier = Modifier.align(Alignment.TopStart).padding(7.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
-                        .padding(3.dp).size(14.dp),
-                )
-            }
-            if (badge != null) {
-                Text(
-                    badge,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(7.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 5.dp, vertical = 2.dp),
-                    fontSize = 8.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
-                )
-            }
-            if (focused) InsetRing()
+        Artwork(url, fallback)
+        if (progress > 0f) Progress(progress, Modifier.align(Alignment.BottomCenter).padding(horizontal = 10.dp, vertical = 9.dp).fillMaxWidth())
+        if (watched) WatchedBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
+        if (cornerIcon != null) {
+            Icon(
+                cornerIcon, contentDescription = null, tint = Color.White,
+                modifier = Modifier.align(Alignment.TopStart).padding(7.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                    .padding(3.dp).size(14.dp),
+            )
+        }
+        if (badge != null) {
+            Text(
+                badge,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(7.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                fontSize = 8.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+            )
         }
     }
 }
+
+/** Degrees the focused card leans when it gets focus. */
+private const val TILT = 4f
 
 /** 2:3 poster with the title underneath (movies, shows). */
 @Composable
@@ -380,13 +474,15 @@ fun PosterCard(
     modifier: Modifier = Modifier,
     badge: String? = null,
     cornerIcon: ImageVector? = null,
+    backdrop: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    val lift = animateLift(focused)
     var cardHeight by remember { mutableIntStateOf(0) }
     Column(Modifier.zIndex(if (focused) 1f else 0f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ArtCard(imageUrl, title, 2f / 3f, progress, watched, badge, onClick, onLongClick, interaction, focused, { cardHeight = it }, modifier, cornerIcon)
-        Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.followCard(focused, cardHeight).padding(horizontal = 2.dp))
+        ArtCard(imageUrl, title, 2f / 3f, progress, watched, badge, onClick, onLongClick, interaction, focused, lift, { cardHeight = it }, modifier, cornerIcon, backdrop)
+        Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.followCard(lift, cardHeight).padding(horizontal = 2.dp))
     }
 }
 
@@ -404,20 +500,58 @@ fun WideCard(
     width: androidx.compose.ui.unit.Dp? = null,
     subtitleFirst: Boolean = false,
     badge: String? = null,
+    backdrop: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    val lift = animateLift(focused)
     var cardHeight by remember { mutableIntStateOf(0) }
     Column(
         modifier = (if (width != null) Modifier.width(width) else Modifier).zIndex(if (focused) 1f else 0f),
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        ArtCard(imageUrl, title, 16f / 9f, progress, watched, badge, onClick, onLongClick, interaction, focused, { cardHeight = it }, modifier)
-        Column(Modifier.followCard(focused, cardHeight).padding(horizontal = 2.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        ArtCard(imageUrl, title, 16f / 9f, progress, watched, badge, onClick, onLongClick, interaction, focused, lift, { cardHeight = it }, modifier, backdrop = backdrop)
+        Column(Modifier.followCard(lift, cardHeight).padding(horizontal = 2.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             val small: @Composable (String) -> Unit = { Text(it, fontSize = 9.5.sp, color = Palette.Secondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             val big: @Composable (String) -> Unit = { Text(it, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             if (subtitleFirst) { subtitle?.let { small(it) }; big(title) } else { big(title); subtitle?.let { small(it) } }
         }
+    }
+}
+
+// --- Backdrop ---
+
+/** Set by a focused card on a screen inside [WithBackdrop]: the artwork to show behind it. */
+val LocalBackdrop = staticCompositionLocalOf<MutableState<String?>?> { null }
+
+/**
+ * The focused title's artwork behind [content], blurred (Android 12 and up; just faded before) and
+ * fading into the ground towards the bottom. It changes once focus has rested for a moment, so
+ * scrolling past items doesn't load an image for each of them. Ask for a small image: blurred and
+ * scaled up, nobody sees the difference.
+ */
+@Composable
+fun WithBackdrop(content: @Composable () -> Unit) {
+    // Saved with the screen, so coming back to it brings its backdrop back too.
+    val focused = rememberSaveable { mutableStateOf<String?>(null) }
+    var image by remember { mutableStateOf<ImageBitmap?>(null) }
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        val loader = SingletonImageLoader.get(context)
+        snapshotFlow { focused.value }.filterNotNull().collectLatest { url ->
+            delay(300)
+            val result = loader.execute(ImageRequest.Builder(context).data(url).build())
+            (result as? SuccessResult)?.let { image = it.image.toBitmap().asImageBitmap() }
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        Crossfade(image, animationSpec = tween(400), label = "backdrop") { bitmap ->
+            if (bitmap != null) {
+                Image(bitmap, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(24.dp, BlurredEdgeTreatment.Rectangle))
+            }
+        }
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Palette.Ground.copy(alpha = 0.55f), 0.8f to Palette.Ground)))
+        CompositionLocalProvider(LocalBackdrop provides focused, content = content)
     }
 }
 
@@ -563,6 +697,16 @@ fun ItemMenu(
     // would press the menu's first button and close it. OK only counts again after that release.
     var armed by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss) {
+        // Frosted: the screen behind blurs (Android 12 and up, where the TV allows it; just dimmed before).
+        val view = LocalView.current
+        val blurPx = with(LocalDensity.current) { 20.dp.roundToPx() }
+        SideEffect {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            if (Build.VERSION.SDK_INT >= 31 && window != null) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                window.attributes = window.attributes.apply { blurBehindRadius = blurPx }
+            }
+        }
         Column(
             Modifier
                 .onPreviewKeyEvent { e ->

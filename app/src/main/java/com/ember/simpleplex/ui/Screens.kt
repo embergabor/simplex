@@ -164,69 +164,72 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
         .filter { it.librarySectionId == null || it.librarySectionId !in hidden }
 
     // Scrolls if the rows don't all fit, following focus.
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 36.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        TopMenu(Screen.Home, nav)
-        if (continuing.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
-                PinnedRow {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    ) {
-                        items(continuing, key = { it.ratingKey }) { item ->
-                            WideCard(
-                                imageUrl = plex.image(if (item.isEpisode) item.thumb else item.art ?: item.thumb, 400, 225),
-                                title = if (item.isEpisode) item.grandparentTitle ?: item.title else item.title,
-                                subtitle = if (item.isEpisode) "${item.episodeLabel} · ${item.title}" else if (item.viewOffset > 0) timeLeft(item) else null,
-                                progress = item.progress,
-                                watched = false,
-                                onClick = { nav.play(listOf(item.ratingKey)) },
-                                onLongClick = { menuFor = item },
-                                width = 200.dp,
-                                modifier = Modifier.remembersFocus(memory, "c" + item.ratingKey, default = item == continuing.first()),
-                            )
+    WithBackdrop {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            TopMenu(Screen.Home, nav)
+            if (continuing.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
+                    PinnedRow {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(20.dp),
+                        ) {
+                            items(continuing, key = { it.ratingKey }) { item ->
+                                WideCard(
+                                    imageUrl = plex.image(if (item.isEpisode) item.thumb else item.art ?: item.thumb, 400, 225),
+                                backdrop = plex.image(item.art ?: item.thumb, 640, 360),
+                                    title = if (item.isEpisode) item.grandparentTitle ?: item.title else item.title,
+                                    subtitle = if (item.isEpisode) "${item.episodeLabel} · ${item.title}" else if (item.viewOffset > 0) timeLeft(item) else null,
+                                    progress = item.progress,
+                                    watched = false,
+                                    onClick = { nav.play(listOf(item.ratingKey)) },
+                                    onLongClick = { menuFor = item },
+                                    width = 200.dp,
+                                    modifier = Modifier.remembersFocus(memory, "c" + item.ratingKey, default = item == continuing.first()),
+                                )
+                            }
                         }
                     }
                 }
             }
-        }
-        SearchBox(
-            onOpen = { nav.push(Screen.Search) },
-            modifier = Modifier.padding(horizontal = 48.dp).remembersFocus(memory, "search"),
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionTitle("Libraries", Modifier.padding(horizontal = 48.dp))
-            PinnedRow {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(24.dp),
-                ) {
-                    itemsIndexed(libraries, key = { _, lib -> lib.key }) { i, lib ->
-                        IconTile(
-                            icon = when (lib.kind) {
-                                Library.Kind.MOVIES -> Icons.Film
-                                Library.Kind.SHOWS -> Icons.Tv
-                                Library.Kind.OTHER -> Icons.Folder
-                            },
-                            label = lib.title,
-                            onClick = {
-                                nav.push(if (lib.kind == Library.Kind.OTHER) Screen.Folder(lib, null, emptyList()) else Screen.Grid(lib))
-                            },
-                            modifier = Modifier.size(180.dp, 108.dp)
-                                .remembersFocus(memory, "l" + lib.key, default = continuing.isEmpty() && i == 0),
-                        )
-                    }
-                    item(key = "edit") {
-                        IconTile(
-                            icon = Icons.Edit,
-                            label = "Edit",
-                            onClick = { editing = true },
-                            modifier = Modifier.size(108.dp, 108.dp).remembersFocus(memory, "edit", default = allLibraries.isEmpty()),
-                        )
+            SearchBox(
+                onOpen = { nav.push(Screen.Search) },
+                modifier = Modifier.padding(horizontal = 48.dp).remembersFocus(memory, "search"),
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                SectionTitle("Libraries", Modifier.padding(horizontal = 48.dp))
+                PinnedRow {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    ) {
+                        itemsIndexed(libraries, key = { _, lib -> lib.key }) { i, lib ->
+                            IconTile(
+                                icon = when (lib.kind) {
+                                    Library.Kind.MOVIES -> Icons.Film
+                                    Library.Kind.SHOWS -> Icons.Tv
+                                    Library.Kind.OTHER -> Icons.Folder
+                                },
+                                label = lib.title,
+                                onClick = {
+                                    nav.push(if (lib.kind == Library.Kind.OTHER) Screen.Folder(lib, null, emptyList()) else Screen.Grid(lib))
+                                },
+                                modifier = Modifier.size(180.dp, 108.dp)
+                                    .remembersFocus(memory, "l" + lib.key, default = continuing.isEmpty() && i == 0),
+                            )
+                        }
+                        item(key = "edit") {
+                            IconTile(
+                                icon = Icons.Edit,
+                                label = "Edit",
+                                onClick = { editing = true },
+                                modifier = Modifier.size(108.dp, 108.dp).remembersFocus(memory, "edit", default = allLibraries.isEmpty()),
+                            )
+                        }
                     }
                 }
             }

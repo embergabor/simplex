@@ -90,15 +90,17 @@ fun PlexVerseScreen(plex: PlexClient, nav: Nav) {
     if (waiting && (pending > 0 || states.isEmpty())) return PrefetchPanel(plex, states) { waiting = false }
 
     val memory = rememberFocusMemory()
-    Column(Modifier.fillMaxSize().padding(vertical = 36.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        TopMenu(Screen.PlexVerse, nav)
-        UpdatingBar(states)
-        ContinueRow(plex, store, kids = false, nav, memory)
-        Row(Modifier.padding(horizontal = 48.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            IconTile(Icons.Film, "Movies", { nav.push(Screen.VerseGrid(Category.MOVIES)) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "movies", default = true))
-            IconTile(Icons.Tv, "Series", { nav.push(Screen.VerseGrid(Category.SERIES)) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "series"))
-            IconTile(Icons.Folder, "Videos", { nav.push(Screen.VerseVideos) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "videos"))
-            IconTile(Icons.Edit, "Customize", { nav.push(Screen.PlexVerseSetup) }, Modifier.size(108.dp, 108.dp).remembersFocus(memory, "customize"))
+    WithBackdrop {
+        Column(Modifier.fillMaxSize().padding(vertical = 36.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            TopMenu(Screen.PlexVerse, nav)
+            UpdatingBar(states)
+            ContinueRow(plex, store, kids = false, nav, memory)
+            Row(Modifier.padding(horizontal = 48.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                IconTile(Icons.Film, "Movies", { nav.push(Screen.VerseGrid(Category.MOVIES)) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "movies", default = true))
+                IconTile(Icons.Tv, "Series", { nav.push(Screen.VerseGrid(Category.SERIES)) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "series"))
+                IconTile(Icons.Folder, "Videos", { nav.push(Screen.VerseVideos) }, Modifier.size(180.dp, 108.dp).remembersFocus(memory, "videos"))
+                IconTile(Icons.Edit, "Customize", { nav.push(Screen.PlexVerseSetup) }, Modifier.size(108.dp, 108.dp).remembersFocus(memory, "customize"))
+            }
         }
     }
 }
@@ -128,6 +130,7 @@ private fun ContinueRow(plex: PlexClient, store: VerseStore, kids: Boolean, nav:
                     val item = c.item
                     WideCard(
                         imageUrl = connected[c.sources.first().machineId]?.image(if (item.isEpisode) item.thumb else item.art ?: item.thumb, 400, 225),
+                    backdrop = connected[c.sources.first().machineId]?.image(item.art ?: item.thumb, 640, 360),
                         title = if (item.isEpisode) item.grandparentTitle ?: item.title else item.title,
                         subtitle = if (item.isEpisode) "${item.episodeLabel} · ${item.title}" else if (item.viewOffset > 0) timeLeft(item) else null,
                         progress = item.progress,
@@ -208,53 +211,56 @@ fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
     val headers = if (kids) 2 else 1
     PreloadImages(grid, entries, connected) { i -> entries.getOrNull(i - headers)?.let(poster) }
 
-    LazyVerticalGrid(
-        state = grid,
-        columns = GridCells.Fixed(if (kids) 5 else 6),
-        contentPadding = PaddingValues(horizontal = 48.dp, vertical = if (kids) 36.dp else 40.dp),
-        horizontalArrangement = Arrangement.spacedBy(24.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp),
-    ) {
-        if (kids) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                // The grid has its own side margins, so the menu goes without the extra ones.
-                Box(Modifier.layout { m, c ->
-                    val bleed = 48.dp.roundToPx()
-                    val p = m.measure(c.copy(maxWidth = c.maxWidth + 2 * bleed))
-                    layout(c.maxWidth, p.height) { p.place(-bleed, 0) }
-                }) {
-                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                        TopMenu(Screen.Kids, nav)
-                        ContinueRow(plex, store, kids = true, nav, memory)
+    Backdrop(kids) {
+        LazyVerticalGrid(
+            state = grid,
+            columns = GridCells.Fixed(if (kids) 5 else 6),
+            contentPadding = PaddingValues(horizontal = 48.dp, vertical = if (kids) 36.dp else 40.dp),
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
+        ) {
+            if (kids) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    // The grid has its own side margins, so the menu goes without the extra ones.
+                    Box(Modifier.layout { m, c ->
+                        val bleed = 48.dp.roundToPx()
+                        val p = m.measure(c.copy(maxWidth = c.maxWidth + 2 * bleed))
+                        layout(c.maxWidth, p.height) { p.place(-bleed, 0) }
+                    }) {
+                        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                            TopMenu(Screen.Kids, nav)
+                            ContinueRow(plex, store, kids = true, nav, memory)
+                        }
                     }
                 }
             }
-        }
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Column(Modifier.padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                ScreenTitle(title, "A–Z")
-                UpdatingBar(states, Modifier)
-                if (entries.isEmpty() && states.values.none { it == ServerState.Waiting }) {
-                    Text("Nothing here yet.", fontSize = 13.sp, color = Palette.Secondary)
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column(Modifier.padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ScreenTitle(title, "A–Z")
+                    UpdatingBar(states, Modifier)
+                    if (entries.isEmpty() && states.values.none { it == ServerState.Waiting }) {
+                        Text("Nothing here yet.", fontSize = 13.sp, color = Palette.Secondary)
+                    }
                 }
             }
-        }
-        items(entries, key = { it.key }) { entry ->
-            PosterCard(
-                title = entry.item.title,
-                imageUrl = poster(entry),
-                progress = entry.item.progress,
-                watched = entry.item.watched,
-                badge = if (entry.sources.size > 1) "×${entry.sources.size}" else null,
-                cornerIcon = if (kids && entry.item.type == "show") Icons.Tv else null,
-                onClick = {
-                    if (entry.item.type == "show") nav.push(Screen.Show(entry.item, entry.sources))
-                    else nav.play(listOf(entry.sources.joinToString(",") { it.ref }))
-                },
-                // The menu acts on the copies on servers that answered, so it needs one.
-                onLongClick = { if (!kids && entry.sources.any { it.machineId in connected }) menuFor = entry },
-                modifier = Modifier.remembersFocus(memory, entry.key, default = entry == entries.first()),
-            )
+            items(entries, key = { it.key }) { entry ->
+                PosterCard(
+                    title = entry.item.title,
+                    imageUrl = poster(entry),
+                backdrop = entry.sources.firstOrNull { it.machineId in connected }?.let { connected[it.machineId]?.image(it.item.art ?: it.item.thumb, 640, 360) },
+                    progress = entry.item.progress,
+                    watched = entry.item.watched,
+                    badge = if (entry.sources.size > 1) "×${entry.sources.size}" else null,
+                    cornerIcon = if (kids && entry.item.type == "show") Icons.Tv else null,
+                    onClick = {
+                        if (entry.item.type == "show") nav.push(Screen.Show(entry.item, entry.sources))
+                        else nav.play(listOf(entry.sources.joinToString(",") { it.ref }))
+                    },
+                    // The menu acts on the copies on servers that answered, so it needs one.
+                    onLongClick = { if (!kids && entry.sources.any { it.machineId in connected }) menuFor = entry },
+                    modifier = Modifier.remembersFocus(memory, entry.key, default = entry == entries.first()),
+                )
+            }
         }
     }
     menuFor?.let { entry ->
@@ -515,3 +521,7 @@ private fun LibraryRow(title: String, choice: LibraryChoice, kidsSeparate: Boole
 /** Kids' movies and series in one grid, from every server. */
 @Composable
 fun KidsScreen(plex: PlexClient, nav: Nav) = VerseGridScreen(plex, null, nav)
+
+/** [WithBackdrop] around [content] on Kids; Movies and Series go without. */
+@Composable
+private fun Backdrop(on: Boolean, content: @Composable () -> Unit) = if (on) WithBackdrop(content) else content()
