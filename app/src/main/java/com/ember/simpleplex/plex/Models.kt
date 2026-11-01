@@ -37,6 +37,10 @@ data class Item(
     val titleSort: String = title,
     /** Plex's intro and credits markers; only in full metadata. */
     val markers: List<Marker> = emptyList(),
+    /** Plex's own guid and the agents' ids (imdb://, tmdb://, tvdb://), for matching across servers. */
+    val guids: List<String> = emptyList(),
+    /** When it was last watched, in seconds; 0 if never. */
+    val lastViewedAt: Long = 0,
 ) {
     val isEpisode get() = type == "episode"
 
@@ -129,9 +133,9 @@ object Episodes {
     fun favorites(ordered: List<Item>, labelled: Set<String>) = ordered.filter { it.ratingKey in labelled || isFavorite(it) }
 
     /** Season order with specials (season 0) last, then episode order. */
-    fun ordered(list: List<Item>): List<Item> = list.sortedWith(
-        compareBy<Item>({ (it.parentIndex ?: 0).let { s -> if (s == 0) Int.MAX_VALUE else s } }, { it.index ?: 0 })
-    )
+    val order: Comparator<Item> = compareBy({ (it.parentIndex ?: 0).let { s -> if (s == 0) Int.MAX_VALUE else s } }, { it.index ?: 0 })
+
+    fun ordered(list: List<Item>): List<Item> = list.sortedWith(order)
 
     /** Index of the episode "Play" should start with: one in progress, else the one after the last watched. */
     fun nextUp(ordered: List<Item>): Int {
@@ -187,6 +191,8 @@ internal fun parseItem(o: JSONObject) = Item(
     markers = o.optJSONArray("Marker").objects().mapNotNull { m ->
         Marker(m.str("type") ?: return@mapNotNull null, m.long("startTimeOffset") ?: return@mapNotNull null, m.long("endTimeOffset") ?: return@mapNotNull null, m.bool("final"))
     },
+    guids = listOfNotNull(o.str("guid")) + o.optJSONArray("Guid").objects().mapNotNull { it.str("id") },
+    lastViewedAt = o.long("lastViewedAt") ?: 0,
     media = o.optJSONArray("Media").objects().map { m ->
         Media(
             parts = m.optJSONArray("Part").objects().map { p ->

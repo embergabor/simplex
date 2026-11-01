@@ -66,7 +66,7 @@ fun SettingsScreen(plex: PlexClient, nav: Nav) {
     val memory = rememberFocusMemory()
     val prefs = remember { LibraryPrefs(context) }
     var hidden by remember { mutableStateOf(prefs.hidden) }
-    val libraries by load(Unit) { plex.libraries() }
+    val libraries by load(Unit) { requireNotNull(plex.home).libraries() }
     var cleared by remember { mutableStateOf(0) }
     val cacheSize by produceState<Long?>(null, cleared) { value = withContext(Dispatchers.IO) { Caches.size(context) } }
 
@@ -113,7 +113,7 @@ fun SettingsScreen(plex: PlexClient, nav: Nav) {
         )
 
         SectionTitle("Server", Modifier.padding(top = 10.dp))
-        Note("Connected to ${plex.serverUri ?: "—"}. Signing out lets you sign in again and pick up a different server.")
+        Note("Connected to ${plex.home?.uri ?: "—"}. Signing out lets you sign in again and pick up a different server.")
         PillButton("Sign out", { plex.signOut(); nav.signOut() }, Modifier.remembersFocus(memory, "signout"))
 
         SectionTitle("Wake server", Modifier.padding(top = 10.dp))
@@ -207,7 +207,7 @@ private fun MacField(plex: PlexClient, modifier: Modifier) {
         saved?.let { mac ->
             PillButton("Wake now", {
                 scope.launch {
-                    status = runCatching { WakeOnLan.send(mac, plex.serverUri) }
+                    status = runCatching { WakeOnLan.send(mac, plex.home?.uri) }
                         .fold({ "Sent. A sleeping server takes a little while to come up." }, { "Couldn't send: ${it.message}" })
                 }
             })

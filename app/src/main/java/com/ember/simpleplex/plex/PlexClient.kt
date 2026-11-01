@@ -2,11 +2,14 @@ package com.ember.simpleplex.plex
 
 import android.content.Context
 import android.os.Build
-import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -14,13 +17,12 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 import java.io.IOException
-import java.net.URLEncoder
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-/** Talks to plex.tv (sign-in, server discovery) and to the user's Plex Media Server. */
+/** Talks to plex.tv: sign-in and the servers the account can reach. Each server is a [PlexServer]. */
 class PlexClient private constructor(context: Context) {
 
     private val prefs = context.getSharedPreferences("plex", Context.MODE_PRIVATE)
@@ -28,23 +30,30 @@ class PlexClient private constructor(context: Context) {
     val clientId: String = prefs.getString("clientId", null)
         ?: UUID.randomUUID().toString().also { prefs.edit().putString("clientId", it).apply() }
 
-    var serverUri: String?
-        get() = prefs.getString("serverUri", null)
-        private set(v) { prefs.edit().putString("serverUri", v).apply() }
+    /** The plex.tv account token, for listing servers. Missing on installs signed in before it was kept. */
+    var accountToken: String?
+        get() = prefs.getString("accountToken", null)
+        private set(v) { prefs.edit().putString("accountToken", v).apply() }
 
-    /** The server's access token (not the plex.tv account token). */
-    var token: String?
-        get() = prefs.getString("token", null)
-        private set(v) { prefs.edit().putString("token", v).apply() }
+    /** The server the app signed in to; Home, Search and the libraries use it. */
+    var home: PlexServer? = run {
+        val uri = prefs.getString("serverUri", null)
+        val token = prefs.getString("token", null)
+        if (uri != null && token != null) PlexServer(uri, token, prefs.getString("machineId", null), this, prefs.getString("serverName", null) ?: "") else null
+    }
+        private set
 
-    val isSignedIn get() = serverUri != null && token != null
+    val isSignedIn get() = home != null
 
-    /** Forgets the server and its token; the next start asks to sign in again. */
+    /** Forgets the servers and the tokens; the next start asks to sign in again. */
     fun signOut() {
-        prefs.edit().remove("serverUri").remove("token").apply()
+        prefs.edit().remove("serverUri").remove("token").remove("machineId").remove("serverName")
+            .remove("accountToken").remove("resources").apply()
+        home = null
+        connected.clear()
     }
 
-    private val http = OkHttpClient.Builder()
+    internal val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
@@ -54,12 +63,14 @@ class PlexClient private constructor(context: Context) {
         .readTimeout(3, TimeUnit.SECONDS)
         .build()
 
-    /** For reports that must outlive a screen (timeline, watched state). */
+    /** For reports that must outlive a screen (timeline, watched state). Each runs on its own, so one failing never stops another. */
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    fun fire(block: suspend PlexClient.() -> Unit) {
+    fun fire(block: suspend () -> Unit) {
         background.launch { runCatching { block() } }
     }
+
+    internal fun request(url: String, token: String?) = Request.Builder().url(url).plexHeaders(token)
 
     private fun Request.Builder.plexHeaders(token: String?) = apply {
         header("Accept", "application/json")
@@ -72,21 +83,11 @@ class PlexClient private constructor(context: Context) {
         if (token != null) header("X-Plex-Token", token)
     }
 
-    private suspend fun call(req: Request, client: OkHttpClient = http): String = withContext(Dispatchers.IO) {
+    internal suspend fun call(req: Request, client: OkHttpClient = http): String = withContext(Dispatchers.IO) {
         client.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw IOException("Plex answered ${r.code} for ${req.url.encodedPath}")
             r.body.string()
         }
-    }
-
-    private suspend fun get(path: String): JSONObject {
-        val req = Request.Builder().url(requireNotNull(serverUri) + path).plexHeaders(token).build()
-        return JSONObject(call(req)).optJSONObject("MediaContainer") ?: JSONObject()
-    }
-
-    private suspend fun send(path: String, method: String = "GET") {
-        val body = if (method == "GET") null else ByteArray(0).toRequestBody()
-        call(Request.Builder().url(requireNotNull(serverUri) + path).method(method, body).plexHeaders(token).build())
     }
 
     // --- Sign-in: plex.tv/link PIN flow ---
@@ -107,31 +108,17 @@ class PlexClient private constructor(context: Context) {
 
     /** Finds the account's server and the first connection that answers, preferring the local network. */
     suspend fun connect(accountToken: String) {
-        val req = Request.Builder().url("$PLEX_TV/resources?includeHttps=1&includeRelay=1").plexHeaders(accountToken).build()
-        val servers = JSONArray(call(req)).objects()
-            .filter { it.str("provides")?.contains("server") == true }
-            .sortedByDescending { it.bool("owned") }
-        for (server in servers) {
-            val serverToken = server.str("accessToken") ?: accountToken
-            val candidates = buildList {
-                val conns = server.optJSONArray("connections").objects().sortedBy { c ->
-                    when {
-                        c.bool("local") && !c.bool("relay") -> 0
-                        !c.bool("relay") -> 1
-                        else -> 2
-                    }
-                }
-                for (c in conns) {
-                    c.str("uri")?.let(::add)
-                    // plex.direct names can be blocked by router DNS rebinding protection; plain http works locally.
-                    val address = c.str("address")
-                    if (c.bool("local") && address != null) add("http://$address:${c.int("port") ?: 32400}")
-                }
-            }
-            for (uri in candidates) {
-                if (probe(uri, serverToken)) {
-                    serverUri = uri.trimEnd('/')
-                    token = serverToken
+        this.accountToken = accountToken
+        for (server in fetchServers(accountToken).sortedByDescending { it.owned }) {
+            for (uri in server.uris) {
+                if (probe(uri, server.accessToken)) {
+                    prefs.edit()
+                        .putString("serverUri", uri)
+                        .putString("token", server.accessToken)
+                        .putString("machineId", server.machineId)
+                        .putString("serverName", server.name)
+                        .apply()
+                    home = PlexServer(uri, server.accessToken, server.machineId, this, server.name)
                     return
                 }
             }
@@ -139,232 +126,121 @@ class PlexClient private constructor(context: Context) {
         throw IOException("Couldn't reach a Plex server on this account")
     }
 
+    /** Keeps the account token of an install signed in before it was kept, once plex.tv accepts it. */
+    suspend fun linkAccount(accountToken: String) {
+        fetchServers(accountToken)
+        this.accountToken = accountToken
+    }
+
+    // --- Every server the account can reach ---
+
+    /** A server from plex.tv: the account's own or one shared with it, with its own access token. */
+    data class ServerInfo(val machineId: String, val name: String, val owned: Boolean, val accessToken: String, val uris: List<String>)
+
+    /** The servers as last listed by [servers], so PlexVerse can start without waiting on plex.tv. */
+    val cachedServers: List<ServerInfo>
+        get() = prefs.getString("resources", null)?.let { runCatching { parseResources(it, accountToken ?: "") }.getOrNull() }.orEmpty()
+
+    /** Lists the servers on plex.tv (needs [accountToken]) and keeps the answer for [cachedServers]. */
+    suspend fun servers(): List<ServerInfo> = fetchServers(requireNotNull(accountToken) { "Not signed in to plex.tv" })
+
+    private suspend fun fetchServers(accountToken: String): List<ServerInfo> {
+        val json = call(request("$PLEX_TV/resources?includeHttps=1&includeRelay=1", accountToken).build())
+        val servers = parseResources(json, accountToken)
+        prefs.edit().putString("resources", json).apply()
+        // Installs from before the home server's id was kept: it's the one with the same token.
+        val h = home
+        if (h != null && h.machineId == null) servers.find { it.accessToken == h.token }?.let { s ->
+            prefs.edit().putString("machineId", s.machineId).putString("serverName", s.name).apply()
+            home = PlexServer(h.uri, h.token, s.machineId, this, s.name)
+        }
+        return servers
+    }
+
+    private val connected = ConcurrentHashMap<String, PlexServer>()
+
+    /**
+     * A connection to one server, picked the first time it's needed: every candidate address is tried
+     * at once and the first that answers is kept (also as a hint for next time). Null if none answers.
+     */
+    suspend fun server(machineId: String): PlexServer? {
+        connected[machineId]?.let { return it }
+        home?.takeIf { it.machineId == machineId }?.let { return it }
+        val info = (cachedServers.find { it.machineId == machineId } ?: runCatching { servers() }.getOrNull()?.find { it.machineId == machineId }) ?: return null
+        val hint = prefs.getString("uri-$machineId", null)
+        val uri = firstAnswering(listOfNotNull(hint) + info.uris, info.accessToken)
+            // The saved list may be out of date (a new IP): ask plex.tv where the server is now.
+            ?: runCatching { servers() }.getOrNull()?.find { it.machineId == machineId }?.let { firstAnswering(it.uris, it.accessToken) }
+            ?: return null
+        prefs.edit().putString("uri-$machineId", uri).apply()
+        return PlexServer(uri, info.accessToken, machineId, this, info.name).also { connected[machineId] = it }
+    }
+
+    private val relocating = ConcurrentHashMap<String, Mutex>()
+
+    /**
+     * After a request to [server] at [failed] didn't go through: finds where the server answers now,
+     * from plex.tv's current list, and moves [server] there (saved for next time). True if it moved, so
+     * the request is worth repeating. A server that still answers at [failed] stays (the request failed
+     * for another reason). One lookup per server at a time; the requests waiting on it reuse its answer.
+     */
+    internal suspend fun relocate(server: PlexServer, failed: String): Boolean {
+        val id = server.machineId ?: return false
+        return relocating.computeIfAbsent(id) { Mutex() }.withLock {
+            if (server.uri != failed) return@withLock true
+            if (probe(failed, server.token)) return@withLock false
+            val info = runCatching { servers() }.getOrNull()?.find { it.machineId == id } ?: return@withLock false
+            val uri = firstAnswering(info.uris - failed, server.token) ?: return@withLock false
+            server.uri = uri
+            prefs.edit().putString(if (server === home) "serverUri" else "uri-$id", uri).apply()
+            true
+        }
+    }
+
+    /** Tries every address at once; the first that answers, or null. */
+    private suspend fun firstAnswering(uris: List<String>, token: String): String? = channelFlow {
+        uris.distinct().forEach { launch { if (probe(it, token)) send(it) } }
+    }.firstOrNull()
+
     private suspend fun probe(uri: String, token: String) = runCatching {
         call(Request.Builder().url("$uri/identity").plexHeaders(token).build(), probeHttp)
     }.isSuccess
 
-    // --- Library ---
-
-    suspend fun libraries(): List<Library> = get("/library/sections").optJSONArray("Directory").objects().mapNotNull { d ->
-        val kind = when (d.str("type")) {
-            "show" -> Library.Kind.SHOWS
-            "movie" -> if (d.str("agent")?.contains("none") == true) Library.Kind.OTHER else Library.Kind.MOVIES
-            else -> return@mapNotNull null // music and photos are left out on purpose
-        }
-        Library(d.str("key") ?: return@mapNotNull null, d.str("title") ?: "", kind)
-    }
-
-    suspend fun libraryItems(sectionKey: String) = get("/library/sections/$sectionKey/all?sort=titleSort").items()
-
-    /**
-     * A library's list as Plex's raw JSON, for search to keep a copy on the TV: its titles, or with
-     * [episodes] every episode of a TV library (with descriptions). Read back with [parseItems].
-     */
-    suspend fun libraryJson(sectionKey: String, episodes: Boolean): String {
-        val path = "/library/sections/$sectionKey/all?" + if (episodes) "type=4" else "sort=titleSort"
-        return call(Request.Builder().url(requireNotNull(serverUri) + path).plexHeaders(token).build())
-    }
-
-    /** A show's episodes. Their library comes from the list itself, since the episodes may not say. */
-    suspend fun episodes(showKey: String): List<Item> {
-        val mc = get("/library/metadata/$showKey/allLeaves")
-        val section = mc.str("librarySectionID")
-        return mc.items().map { if (it.librarySectionId == null) it.copy(librarySectionId = section) else it }
-    }
-
-    /**
-     * The items of one Plex [type] in a library that carry [label]: 4 for a TV library's episodes, 1 for
-     * the videos of a movie or "other videos" library. Asked the way Plex's own filters do: the label's
-     * id first, then the items with that id. Empty when nothing has it yet.
-     */
-    suspend fun labelled(sectionKey: String, label: String, type: Int): List<Item> {
-        val tag = get("/library/sections/$sectionKey/label?type=$type").optJSONArray("Directory").objects()
-            .firstOrNull { it.str("title").equals(label, ignoreCase = true) } ?: return emptyList()
-        val id = (tag.str("key") ?: return emptyList()).substringAfterLast('=').substringAfterLast('/')
-        return get("/library/sections/$sectionKey/all?type=$type&label=${enc(id)}&sort=titleSort").items()
-            // A list that carries labels must have this one; otherwise Plex ignored the filter.
-            .filter { it.labels.isEmpty() || it.labels.any { l -> l.equals(label, ignoreCase = true) } }
-    }
-
-    /** Adds or removes a label on one item, keeping its other labels, and checks that Plex kept the change. */
-    suspend fun setLabel(ratingKey: String, label: String, on: Boolean) {
-        val item = metadata(ratingKey)
-        val has = item.labels.any { it.equals(label, ignoreCase = true) }
-        if (has == on) return
-        val section = item.librarySectionId ?: throw IOException("Plex didn't say which library this is in")
-        val type = when (item.type) {
-            "movie" -> 1
-            "show" -> 2
-            "season" -> 3
-            "episode" -> 4
-            else -> throw IOException("Plex can't label a ${item.type}")
-        }
-        val tags = if (on) {
-            (item.labels + label).mapIndexed { i, l -> "label[$i].tag.tag=${enc(l)}" }.joinToString("&")
-        } else {
-            "label[].tag.tag-=${enc(label)}"
-        }
-        send("/library/sections/$section/all?type=$type&id=$ratingKey&$tags&label.locked=1", "PUT")
-        val saved = metadata(ratingKey).labels.any { it.equals(label, ignoreCase = true) }
-        if (saved != on) throw IOException("Plex didn't keep the change")
-    }
-
-    /** Full metadata including streams and intro/credits markers, needed before playback. */
-    suspend fun metadata(ratingKey: String): Item {
-        val mc = get("/library/metadata/$ratingKey?includeMarkers=1")
-        val item = mc.items().first()
-        return if (item.librarySectionId == null) item.copy(librarySectionId = mc.str("librarySectionID")) else item
-    }
-
-    suspend fun continueWatching(): List<Item> {
-        val items = runCatching { get("/hubs/continueWatching/items").items() }
-            .getOrElse { get("/library/onDeck").items() }
-        return items.filter { it.type == "movie" || it.type == "episode" || it.type == "clip" }
-    }
-
-    /** One level of an "Other Videos" library as it sits on disk. [key] is null for the library root. */
-    suspend fun folder(sectionKey: String, key: String?): List<FolderEntry> {
-        val mc = get(key ?: "/library/sections/$sectionKey/folder")
-        val all = mc.optJSONArray("Directory").objects() + mc.optJSONArray("Metadata").objects()
-        return all.mapNotNull { o ->
-            val k = o.str("key") ?: return@mapNotNull null
-            if (o.str("ratingKey") == null || (k.contains("/folder") && !o.has("Media"))) {
-                FolderEntry.Folder(o.str("title") ?: "", k)
-            } else {
-                FolderEntry.Video(parseItem(o))
-            }
-        }
-    }
-
-    // --- URLs ---
-
-    fun image(path: String?, width: Int, height: Int): String? = path?.let {
-        "$serverUri/photo/:/transcode?width=$width&height=$height&minSize=1&upscale=1&url=${enc(it)}&X-Plex-Token=$token"
-    }
-
-    fun fileUrl(key: String) = "$serverUri$key${if ('?' in key) '&' else '?'}X-Plex-Token=$token"
-
-    /** Saves a server file (e.g. preview thumbnails) to [dest], via a temporary file so it's never half-written. */
-    suspend fun download(path: String, dest: File) = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url(requireNotNull(serverUri) + path).plexHeaders(token).header("Accept", "*/*").build()
-        http.newCall(req).execute().use { r ->
-            if (!r.isSuccessful) throw IOException("Plex answered ${r.code} for $path")
-            val tmp = File(dest.path + ".part")
-            tmp.outputStream().use { out -> r.body.byteStream().copyTo(out) }
-            if (!tmp.renameTo(dest)) throw IOException("Couldn't save $dest")
-        }
-    }
-
-    // --- Playback state ---
-
-    suspend fun timeline(ratingKey: String, state: String, timeMs: Long, durationMs: Long) =
-        send("/:/timeline?ratingKey=$ratingKey&key=%2Flibrary%2Fmetadata%2F$ratingKey&state=$state&time=$timeMs&duration=$durationMs&identifier=com.plexapp.plugins.library")
-
-    /** Takes an item off Continue watching without marking it watched (until it's played again). */
-    suspend fun removeFromContinueWatching(ratingKey: String) =
-        send("/actions/removeFromContinueWatching?ratingKey=$ratingKey", "PUT")
-
-    suspend fun setWatched(ratingKey: String, watched: Boolean) =
-        send("/:/${if (watched) "scrobble" else "unscrobble"}?identifier=com.plexapp.plugins.library&key=$ratingKey")
-
-    /** Remembers the audio/subtitle choice on the server. subtitleId 0 means off. */
-    suspend fun selectStreams(partId: Long, audioId: Long?, subtitleId: Long?) {
-        val params = buildList {
-            audioId?.let { add("audioStreamID=$it") }
-            subtitleId?.let { add("subtitleStreamID=$it") }
-            add("allParts=1")
-        }.joinToString("&")
-        send("/library/parts/$partId?$params", "PUT")
-    }
-
-    /**
-     * [mkv]: a Matroska stream, which can't be seeked (a seek starts a new conversion); otherwise HLS.
-     * [subtitleBurned]: Plex had to burn the subtitle in after all, converting the video.
-     */
-    data class Converted(val url: String, val mkv: Boolean, val videoCopied: Boolean, val subtitleBurned: Boolean)
-
-    /**
-     * Asks Plex for a stream with the audio converted (to 5.1 E-AC3 or AC3, for passthrough); Plex copies
-     * the video when it can. With [keepSubtitle], the subtitle selected on the server comes along as its
-     * own track (text or image) in a Matroska stream: Plex's HLS can't carry image subtitles, and only
-     * burns text ones in. Without it, an HLS stream with no subtitles.
-     */
-    suspend fun convertedStream(ratingKey: String, offsetMs: Long, keepSubtitle: Boolean): Converted {
-        val session = UUID.randomUUID().toString()
-        val platform = if (keepSubtitle) "Generic" else "Android"
-        val limits = listOf(
-            "add-limitation(scope=videoAudioCodec&scopeName=eac3&type=upperBound&name=audio.channels&value=6)",
-            "add-limitation(scope=videoAudioCodec&scopeName=ac3&type=upperBound&name=audio.channels&value=6)",
-        )
-        val profile = if (keepSubtitle) {
-            // Plex's Android profile forces subtitles to be burned in; its generic one (asked for with the
-            // "Generic" platform below) keeps them when the target container can hold them.
-            val mkv = "type=videoProfile&context=streaming&protocol=http&container=mkv"
-            listOf("add-transcode-target($mkv&videoCodec=h264,hevc,mpeg2video,vc1,vp9,av1&audioCodec=eac3,ac3&subtitleCodec=pgs,vobsub,srt,ass)") + limits
-        } else {
-            // Plex starts from its built-in profile for the platform, whose HLS target only allows H.264 video
-            // and stereo AAC audio. These extend that target instead of adding a second one (which Plex ignores).
-            val hls = "type=videoProfile&context=streaming&protocol=hls"
-            listOf(
-                "append-transcode-target-codec($hls&videoCodec=hevc,mpeg2video,vc1,vp9,av1)",
-                "add-transcode-target-audio-codec($hls&audioCodec=eac3)",
-                "add-transcode-target-audio-codec($hls&audioCodec=ac3)",
-            ) + limits
-        }.joinToString("+")
-        val query = listOf(
-            "hasMDE" to "1",
-            "path" to "/library/metadata/$ratingKey",
-            "mediaIndex" to "0",
-            "partIndex" to "0",
-            "protocol" to if (keepSubtitle) "http" else "hls",
-            "fastSeek" to "1",
-            "directPlay" to "0",
-            "directStream" to "1",
-            "directStreamAudio" to "0",
-            "subtitles" to if (keepSubtitle) "embedded" else "none",
-            "videoQuality" to "100",
-            "maxVideoBitrate" to "200000",
-            "videoResolution" to "3840x2160",
-            "location" to "lan",
-            "offset" to (offsetMs / 1000).toString(),
-            "session" to session,
-            "X-Plex-Session-Identifier" to session,
-            "X-Plex-Client-Profile-Extra" to profile,
-            "X-Plex-Client-Identifier" to clientId,
-            "X-Plex-Product" to PRODUCT,
-            "X-Plex-Platform" to platform,
-            "X-Plex-Token" to (token ?: ""),
-        ).let { if (keepSubtitle) it + ("container" to "mkv") else it }
-            .joinToString("&") { (k, v) -> "$k=${enc(v)}" }
-
-        // Sent with the same platform header, so it can't override the query's.
-        val req = Request.Builder().url("$serverUri/video/:/transcode/universal/decision?$query")
-            .plexHeaders(token).header("X-Plex-Platform", platform).build()
-        val decision = JSONObject(call(req)).optJSONObject("MediaContainer") ?: JSONObject()
-        val streams = decision.items().firstOrNull()?.part?.streams.orEmpty()
-        val reason = listOfNotNull(
-            decision.str("generalDecisionText"),
-            decision.str("transcodeDecisionText"),
-        ).distinct().joinToString(" ")
-        Log.i(TAG, "decision keepSubtitle=$keepSubtitle: $reason | " +
-            streams.joinToString { "${it.streamType}:${it.codec}/${it.channels ?: "-"}=${it.decision}" })
-        val video = streams.firstOrNull { it.streamType == 1 }
-            ?: throw IOException("Plex didn't offer a stream. $reason")
-        val endpoint = if (keepSubtitle) "start.mkv" else "start.m3u8"
-        return Converted(
-            url = "$serverUri/video/:/transcode/universal/$endpoint?$query",
-            mkv = keepSubtitle,
-            videoCopied = video.decision == "copy",
-            subtitleBurned = streams.any { it.streamType == 3 && it.decision == "burn" },
-        )
-    }
-
-    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
-
     companion object {
         const val PRODUCT = "Simplex"
-        private const val TAG = "Simplex"
         private const val PLEX_TV = "https://plex.tv/api/v2"
+
+        /**
+         * The servers in a plex.tv /resources answer, each with its connection addresses: local first,
+         * then remote, then relay. [accountToken] stands in for a server that lists no token of its own.
+         */
+        internal fun parseResources(json: String, accountToken: String): List<ServerInfo> =
+            JSONArray(json).objects()
+                .filter { it.str("provides")?.contains("server") == true }
+                .mapNotNull { server ->
+                    val uris = buildList {
+                        val conns = server.optJSONArray("connections").objects().sortedBy { c ->
+                            when {
+                                c.bool("local") && !c.bool("relay") -> 0
+                                !c.bool("relay") -> 1
+                                else -> 2
+                            }
+                        }
+                        for (c in conns) {
+                            c.str("uri")?.let { add(it.trimEnd('/')) }
+                            // plex.direct names can be blocked by router DNS rebinding protection; plain http works locally.
+                            val address = c.str("address")
+                            if (c.bool("local") && address != null) add("http://$address:${c.int("port") ?: 32400}")
+                        }
+                    }
+                    ServerInfo(
+                        machineId = server.str("clientIdentifier") ?: return@mapNotNull null,
+                        name = server.str("name") ?: "",
+                        owned = server.bool("owned"),
+                        accessToken = server.str("accessToken") ?: accountToken,
+                        uris = uris,
+                    )
+                }
 
         fun parseItems(json: String): List<Item> = (JSONObject(json).optJSONObject("MediaContainer") ?: JSONObject()).items()
 

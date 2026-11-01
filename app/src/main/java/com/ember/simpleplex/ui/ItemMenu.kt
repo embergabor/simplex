@@ -2,6 +2,8 @@
 
 package com.ember.simpleplex.ui
 
+import android.os.Build
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -26,10 +29,14 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import com.ember.simpleplex.player.Describe
@@ -37,7 +44,11 @@ import com.ember.simpleplex.player.PlexTracks
 import com.ember.simpleplex.plex.Episodes
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.PlexClient
+import com.ember.simpleplex.plex.PlexServer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -47,17 +58,22 @@ import java.util.Locale
 
 /**
  * [favorite]: whether the item is a favourite, or null where favourites aren't offered.
- * [continueWatching]: opened from Home's Continue watching row, where OK resumes.
+ * [continueWatching]: opened from a Continue watching row, where OK resumes.
+ * [copies]: the item on every server that has it; watched, favourite and Continue watching are changed
+ * on each of them. [playFrom] lists them so one can be picked by hand.
  */
 @Composable
 fun ItemMenu(
-    plex: PlexClient,
+    plex: PlexServer,
     item: Item,
     nav: Nav,
     favorite: Boolean? = null,
     continueWatching: Boolean = false,
+    copies: List<Copy> = listOf(Copy(plex, item)),
+    playFrom: Boolean = false,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val bump = LocalRefreshBump.current
     val first = remember { FocusRequester() }
@@ -65,10 +81,11 @@ fun ItemMenu(
     var showInfo by remember { mutableStateOf(false) }
 
     /** Runs a change on the server; stays open with the reason if it failed, so it doesn't look like success. */
-    fun change(what: String, block: suspend () -> Unit) {
+    fun change(what: String, block: suspend (Copy) -> Unit) {
         scope.launch {
             try {
-                block()
+                // In its own scope, so a server that fails is caught below instead of failing the screen's scope.
+                coroutineScope { copies.map { c -> async { block(c) } }.awaitAll() }
                 bump()
                 onDismiss()
             } catch (e: CancellationException) {
@@ -85,6 +102,16 @@ fun ItemMenu(
     // would press the menu's first button and close it. OK only counts again after that release.
     var armed by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss) {
+        // Frosted: the screen behind blurs (Android 12 and up, where the TV allows it; just dimmed before).
+        val view = LocalView.current
+        val blurPx = with(LocalDensity.current) { 20.dp.roundToPx() }
+        SideEffect {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            if (Build.VERSION.SDK_INT >= 31 && window != null) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                window.attributes = window.attributes.apply { blurBehindRadius = blurPx }
+            }
+        }
         Column(
             Modifier
                 .onPreviewKeyEvent { e ->
@@ -99,26 +126,33 @@ fun ItemMenu(
             Text(item.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.padding(start = 4.dp, bottom = 7.dp))
             // OK on a card resumes only in Continue watching; the menu offers the other way to start.
             val buttons = buildList<Pair<String, () -> Unit>> {
+                val entry = queueEntry(copies)
                 if (item.type != "show") {
-                    if (continueWatching) add("Play from beginning" to { onDismiss(); nav.play(listOf(item.ratingKey)) })
-                    else if (item.viewOffset > 0) add("Resume from ${formatDuration(item.viewOffset)}" to { onDismiss(); nav.play(listOf(item.ratingKey), resume = true) })
+                    if (continueWatching) add("Play from beginning" to { onDismiss(); nav.play(listOf(entry)) })
+                    else if (item.viewOffset > 0) add("Resume from ${formatDuration(item.viewOffset)}" to { onDismiss(); nav.play(listOf(entry), resume = true) })
+                    if (playFrom && copies.size > 1) for (c in copies) {
+                        add("Play from ${c.server.name.ifEmpty { "server" }}" to { onDismiss(); nav.play(listOf(c.ref), resume = continueWatching) })
+                    }
                 }
-                add("Mark as watched" to { change("mark it watched") { plex.setWatched(item.ratingKey, true) } })
-                add("Mark as unwatched" to { change("mark it unwatched") { plex.setWatched(item.ratingKey, false) } })
+                add("Mark as watched" to { change("mark it watched") { c -> c.server.setWatched(c.item.ratingKey, true) } })
+                add("Mark as unwatched" to { change("mark it unwatched") { c -> c.server.setWatched(c.item.ratingKey, false) } })
                 if (favorite != null) {
                     add((if (favorite) "Remove from favorites" else "Add to favorites") to {
-                        change("save the favourite") { plex.setLabel(item.ratingKey, Episodes.FAVORITE, !favorite) }
+                        change("save the favourite") { c -> c.server.setLabel(c.item.ratingKey, Episodes.FAVORITE, !favorite) }
                     })
                 }
                 if (continueWatching) {
-                    add("Remove from Continue watching" to { change("remove it") { plex.removeFromContinueWatching(item.ratingKey) } })
+                    add("Remove from Continue watching" to { change("remove it") { c -> c.server.removeFromContinueWatching(c.item.ratingKey) } })
                     item.grandparentRatingKey?.takeIf { item.isEpisode }?.let { showKey ->
                         add("Go to show" to {
                             scope.launch {
                                 try {
                                     val show = plex.metadata(showKey)
                                     onDismiss()
-                                    nav.push(Screen.Show(show))
+                                    // A show on another server than the home one opens there.
+                                    val home = PlexClient.get(context).home?.machineId
+                                    val id = plex.machineId
+                                    nav.push(Screen.Show(show, if (id == null || id == home) null else listOf(Source(id, show))))
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (e: Exception) {
@@ -144,7 +178,7 @@ fun ItemMenu(
 
 /** A short summary of a video, never a detail page: when and how long, formats, subtitles, the file. */
 @Composable
-private fun InfoPopup(plex: PlexClient, item: Item, onDismiss: () -> Unit) {
+private fun InfoPopup(plex: PlexServer, item: Item, onDismiss: () -> Unit) {
     // Lists don't carry streams or the file, so the full metadata is fetched; the list's item until then.
     val full by produceState(item, item.ratingKey) { value = runCatching { plex.metadata(item.ratingKey) }.getOrDefault(item) }
     val close = remember { FocusRequester() }

@@ -469,7 +469,7 @@ private fun Controls(
                     Text(
                         formatDuration(scrubAt),
                         modifier = Modifier.background(Palette.Ink, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
-                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Palette.OnInk,
                     )
                 }
             }

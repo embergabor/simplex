@@ -36,6 +36,7 @@ import com.ember.simpleplex.plex.Episodes
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Part
 import com.ember.simpleplex.plex.PlexClient
+import com.ember.simpleplex.plex.PlexServer
 import com.ember.simpleplex.plex.Stream
 import com.ember.simpleplex.ui.AppTheme
 import kotlinx.coroutines.CancellationException
@@ -54,12 +55,20 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
 
-    private lateinit var plex: PlexClient
+    private lateinit var client: PlexClient
+    /** The server playing the current item. */
+    private lateinit var plex: PlexServer
     private lateinit var player: ExoPlayer
     private lateinit var caps: AudioCapabilities
     private lateinit var showLanguages: ShowLanguages
 
+    /** Each entry: a ratingKey on the home server, or "machineId|ratingKey" sources, comma-separated, in the order to try. */
     private val queue = mutableListOf<String>()
+    /** Which of the current entry's sources is playing, and whether anything has played from it yet. */
+    private var sourceAt = 0
+    private var started = false
+    /** The current item's copies on the other servers, which get its progress and watched state too. */
+    private var others: List<Pair<PlexServer, String>> = emptyList()
     private var index = 0
     /** Whether the first video continues where it was left; every other one starts from the beginning. */
     private var resume = false
@@ -105,7 +114,8 @@ class PlayerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        plex = PlexClient.get(this)
+        client = PlexClient.get(this)
+        plex = requireNotNull(client.home)
         showLanguages = ShowLanguages(this)
         // What the TV accepts as a bitstream on its current output (here: eARC to the receiver).
         caps = AudioCapabilities.getCapabilities(this, AudioAttributes.DEFAULT, null)
@@ -264,31 +274,68 @@ class PlayerActivity : ComponentActivity() {
         val item = current.value ?: return
         val time = positionMs()
         plex.fire { timeline(item.ratingKey, state, time, item.duration) }
+        // Only where playback rests, not on every tick.
+        if (state != "playing") for ((server, key) in others) server.fire { setProgress(key, time) }
     }
 
-    private fun load() {
+    /** The current entry's sources as (machine id or null for the home server, ratingKey). */
+    private fun sources(entry: String) = entry.split(',').map { s ->
+        if ('|' in s) s.substringBefore('|') to s.substringAfter('|') else null to s
+    }
+
+    private suspend fun serverFor(machineId: String?) = if (machineId == null) client.home else client.server(machineId)
+
+    /**
+     * Plays the current queue entry from its first source that answers, starting at source [from]. A
+     * server that can't be reached or has no file is skipped; only when every source failed is it an error.
+     */
+    private fun load(from: Int = 0) {
         loadJob?.cancel()
         loadJob = lifecycleScope.launch {
-            val key = queue.getOrNull(index) ?: return@launch finish()
+            val sources = sources(queue.getOrNull(index) ?: return@launch finish())
             error.value = null
             // A question still open was about the previous video.
             question.value = null
             answer = null
+            started = false
+            var failure: String? = null
+            var found: Triple<Int, PlexServer, Item>? = null
             preparing.value = true
-            val item = try {
-                plex.metadata(key)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error.value = "Couldn't load this video.\n${e.message}"
-                return@launch
+            try {
+                for (i in from until sources.size) {
+                    val (id, key) = sources[i]
+                    val server = serverFor(id)
+                    if (server == null) {
+                        failure = "The server with this video can't be reached."
+                        continue
+                    }
+                    val item = try {
+                        server.metadata(key)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        failure = "Couldn't load this video.\n${e.message}"
+                        continue
+                    }
+                    if (item.part == null) {
+                        failure = "Plex has no file for “${item.title}”."
+                        continue
+                    }
+                    found = Triple(i, server, item)
+                    break
+                }
             } finally {
                 preparing.value = false
             }
-            val part = item.part ?: run {
-                error.value = "Plex has no file for “${item.title}”."
+            val (at, server, item) = found ?: run {
+                error.value = failure ?: "Couldn't load this video."
                 return@launch
             }
+            val part = item.part!!
+            sourceAt = at
+            plex = server
+            others = emptyList()
+            launch { others = sources.filterIndexed { j, _ -> j != at }.mapNotNull { (id, key) -> serverFor(id)?.let { it to key } } }
 
             current.value = item
             updateSkips()
@@ -310,8 +357,8 @@ class PlayerActivity : ComponentActivity() {
             }
             val plan = PlexTracks.planAudio(part, chosen, caps::supportsEncoding)
 
+            // Cleared once something plays, so a fallback to another server still resumes.
             val start = if (resume) item.viewOffset else 0L
-            resume = false
             val direct = { s: Stream? -> audio.value = s; playDirect(item, part, start) }
             val convert = { audio.value = plan.stream; playConverted(start) }
             when (plan.choice) {
@@ -416,7 +463,6 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-
     private val listener = object : Player.Listener {
         override fun onTracksChanged(tracks: Tracks) {
             val part = current.value?.part ?: return
@@ -430,6 +476,7 @@ class PlayerActivity : ComponentActivity() {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying) { started = true; resume = false }
             if (player.playbackState != Player.STATE_ENDED) report(if (isPlaying) "playing" else "paused")
             holdScreen(isPlaying || player.playbackState == Player.STATE_BUFFERING)
         }
@@ -452,6 +499,8 @@ class PlayerActivity : ComponentActivity() {
                     retried = true
                     playDirect(item, part, positionMs())
                 }
+                // Nothing played yet: the next server with this title may do better. Mid-film errors stay errors.
+                !started && sourceAt + 1 < sources(queue[index]).size -> load(sourceAt + 1)
                 else -> playConverted(positionMs())
             }
         }
@@ -516,6 +565,7 @@ class PlayerActivity : ComponentActivity() {
             timeline(item.ratingKey, "stopped", item.duration, item.duration)
             setWatched(item.ratingKey, true)
         }
+        for ((server, key) in others) server.fire { setWatched(key, true) }
         index++
         if (index < queue.size) load() else finish()
     }
@@ -535,14 +585,16 @@ class PlayerActivity : ComponentActivity() {
      */
     private fun widenToShow(item: Item) {
         val showKey = item.grandparentRatingKey ?: return
+        val server = plex
+        val entry = queue.getOrNull(index)
         wholeShow = true
         lifecycleScope.launch {
-            val episodes = runCatching { Episodes.ordered(plex.episodes(showKey)) }.getOrNull() ?: return@launch
+            val episodes = runCatching { Episodes.ordered(server.episodes(showKey)) }.getOrNull() ?: return@launch
             val at = episodes.indexOfFirst { it.ratingKey == item.ratingKey }
-            // Still on the same episode? Then line the queue up around it.
-            if (at < 0 || queue.getOrNull(index) != item.ratingKey) return@launch
+            // Still on the same episode? Then line the queue up around it, on the server that's playing.
+            if (at < 0 || queue.getOrNull(index) != entry) return@launch
             queue.clear()
-            queue += episodes.map { it.ratingKey }
+            queue += episodes.map { server.ref(it.ratingKey) }
             index = at
             updateSkips()
         }
