@@ -98,11 +98,19 @@ object Icons {
     val Sun = stroke("M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M12 2v2 M12 20v2 M4.9 4.9l1.4 1.4 M17.7 17.7l1.4 1.4 M2 12h2 M20 12h2 M4.9 19.1l1.4-1.4 M17.7 6.3l1.4-1.4")
     val Moon = stroke("M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z")
     val Sunset = stroke("M3 18h18 M7 18a5 5 0 0 1 10 0 M12 7v3 M5.6 11.6l1.4 1.4 M18.4 11.6 17 13 M9 21h6")
+    val Disk = stroke("M4 6a8 3 0 1 0 16 0a8 3 0 1 0-16 0 M4 6v12a8 3 0 0 0 16 0V6 M4 12a8 3 0 0 0 16 0")
+    val Account = stroke("M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 21a8 8 0 0 1 16 0")
     val Smile = stroke("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M8.5 14a4 4 0 0 0 7 0 M9 9.5h.01 M15 9.5h.01", width = 2f)
     val Previous = fill("M5 5h2.6v14H5z M19.5 5v14L8.5 12z")
     val Next = fill("M16.4 5H19v14h-2.6z M4.5 5v14l11-7z")
     val Play = fill("M7 4.5v15l12.5-7.5z")
     val Pause = fill("M6 4h4v16H6z M14 4h4v16h-4z")
+
+    /** A die showing five: the frame, then the pips as round dots. */
+    val Dice: ImageVector = ImageVector.Builder(defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
+        .addPath(addPathNodes("M7.5 3.5h9a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4h-9a4 4 0 0 1-4-4v-9a4 4 0 0 1 4-4z"), stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f, strokeLineJoin = StrokeJoin.Round)
+        .addPath(addPathNodes("M8.5 8.5h.01 M15.5 8.5h.01 M12 12h.01 M8.5 15.5h.01 M15.5 15.5h.01"), stroke = SolidColor(Color.Black), strokeLineWidth = 2.8f, strokeLineCap = StrokeCap.Round)
+        .build()
 
     private fun stroke(d: String, width: Float = 1.6f) = ImageVector.Builder(
         defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f,

@@ -1,21 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- App icon: the same two-tone play button, square. -->
+<!-- App icon: the wordmark's x, two play buttons meeting, on the light grey. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path android:fillColor="#F2F2F4" android:pathData="M24,0h60a24,24 0 0 1 24,24v60a24,24 0 0 1 -24,24h-60a24,24 0 0 1 -24,-24v-60a24,24 0 0 1 24,-24z" />
-    <path
-        android:fillColor="#1C1C1E"
-        android:strokeColor="#1C1C1E"
-        android:strokeWidth="7"
-        android:strokeLineJoin="round"
-        android:pathData="M41,32 L79,54 L41,54 Z" />
-    <path
-        android:fillColor="#8E8E93"
-        android:strokeColor="#8E8E93"
-        android:strokeWidth="7"
-        android:strokeLineJoin="round"
-        android:pathData="M41,54 L79,54 L41,76 Z" />
+    <group android:translateX="21.6" android:translateY="24.85" android:scaleX="1.62" android:scaleY="1.62">
+            <path android:fillColor="#E5A00D" android:strokeColor="#E5A00D" android:strokeWidth="4" android:strokeLineJoin="round" android:pathData="M3,3 L18,18 L3,33 Z" />
+            <path android:fillColor="#B9800A" android:strokeColor="#B9800A" android:strokeWidth="4" android:strokeLineJoin="round" android:pathData="M37,3 L22,18 L37,33 Z" />
+    </group>
 </vector>

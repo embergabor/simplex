@@ -9,9 +9,11 @@ Android TV 8.0+.
 
 ## What it does
 
-- **Home:** Continue watching (the one place OK resumes), Search, and your video libraries as tiles.
-  Settings hides the libraries you don't use. Music and photo libraries are left out.
-- **Libraries:** a grid of 2:3 posters, A–Z (with a letter column to jump), by date added or by year.
+- **Home:** Continue watching (the one place OK resumes) and your video libraries as tiles, under a
+  menu with Search, Home, PlexVerse, Kids and Settings. Settings hides the libraries you don't use.
+  Music and photo libraries are left out.
+- **Libraries:** a grid of 2:3 posters, A–Z (with a letter rail on the right to jump), by date added or by year.
+- **Kids:** big posters, and Surprise me! spins a reel of the kids' titles and plays what it lands on.
   "Other videos" libraries are browsed by folder, with your favourites on top.
 - **No detail pages.** OK plays from the beginning. Hold OK for a menu: resume, mark watched or unwatched,
   favourites, and Info, a short summary of the file.

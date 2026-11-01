@@ -3,8 +3,6 @@
 package com.ember.simpleplex.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,49 +11,57 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.rememberLazyListState
-import kotlinx.coroutines.launch
-import androidx.tv.material3.ClickableSurfaceDefaults
-import androidx.tv.material3.Surface
-import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.runtime.withFrameNanos
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.ember.simpleplex.plex.Episodes
@@ -63,14 +69,14 @@ import com.ember.simpleplex.plex.FolderEntry
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Library
 import com.ember.simpleplex.plex.PlexClient
-import androidx.compose.runtime.produceState
-import com.ember.simpleplex.update.Updates
 import com.ember.simpleplex.plex.PlexServer
+import com.ember.simpleplex.update.Updates
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 sealed interface Screen {
     data object Home : Screen
@@ -214,10 +220,6 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
                     }
                 }
             }
-            SearchBox(
-                onOpen = { nav.push(Screen.Search) },
-                modifier = Modifier.padding(horizontal = 48.dp).remembersFocus(memory, "search"),
-            )
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 SectionTitle("Libraries", Modifier.padding(horizontal = 48.dp))
                 val first = remember { FocusRequester() }
@@ -253,19 +255,9 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
                                     onClick = { nav.push(Screen.Settings) },
                                     modifier = Modifier.size(150.dp, 108.dp)
                                         .then(if (libraries.isEmpty()) Modifier.focusRequester(first) else Modifier)
-                                        .remembersFocus(memory, "update"),
+                                        .remembersFocus(memory, "update", default = continuing.isEmpty() && libraries.isEmpty()),
                                 )
                             }
-                        }
-                        item(key = "settings") {
-                            IconTile(
-                                icon = Icons.Settings,
-                                label = "Settings",
-                                onClick = { nav.push(Screen.Settings) },
-                                modifier = Modifier.size(108.dp, 108.dp)
-                                    .then(if (libraries.isEmpty() && update == null) Modifier.focusRequester(first) else Modifier)
-                                    .remembersFocus(memory, "settings", default = allLibraries.isEmpty()),
-                            )
                         }
                     }
                 }
@@ -296,12 +288,12 @@ fun GridScreen(plex: PlexServer, library: Library, nav: Nav) {
     // Index 0 is the title.
     PreloadImages(grid, items) { i -> items.getOrNull(i - 1)?.let { plex.image(it.thumb, 248, 372) } }
 
-    Row(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(6),
             state = grid,
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(start = 48.dp, end = if (letters.isEmpty()) 48.dp else 20.dp, top = 40.dp, bottom = 40.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 48.dp, end = if (letters.isEmpty()) 48.dp else 64.dp, top = 40.dp, bottom = 40.dp),
             horizontalArrangement = Arrangement.spacedBy(24.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
@@ -344,7 +336,7 @@ fun GridScreen(plex: PlexServer, library: Library, nav: Nav) {
             }
         }
         if (letters.isNotEmpty()) {
-            LetterColumn(letters, Modifier.padding(top = 40.dp, bottom = 24.dp, end = 16.dp)) { first ->
+            LetterRail(letters, Modifier.align(Alignment.TopEnd).padding(top = 40.dp, end = 16.dp)) { first ->
                 jumpTo = items[first].ratingKey
                 // +1 for the title row.
                 scope.launch { grid.scrollToItem(first + 1) }
@@ -354,25 +346,63 @@ fun GridScreen(plex: PlexServer, library: Library, nav: Nav) {
     menuFor?.let { ItemMenu(plex, it, nav) { menuFor = null } }
 }
 
-/** The letters a sorted grid has, top to bottom; OK jumps to the first title under one. */
+private const val ALPHABET = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+private val LETTER_HEIGHT = 16.dp
+
+/**
+ * A–Z down the right edge, over the grid: every letter, the ones without titles dimmed. The focused
+ * letter also shows big beside the rail. OK or ◀ jumps to the first title under it.
+ */
 @Composable
-private fun LetterColumn(letters: List<Pair<Char, Int>>, modifier: Modifier, onJump: (Int) -> Unit) {
-    Column(modifier.fillMaxHeight(), verticalArrangement = Arrangement.SpaceEvenly) {
-        letters.forEach { (letter, first) ->
-            Surface(
-                onClick = { onJump(first) },
-                modifier = Modifier.size(22.dp, 17.dp),
-                shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(4.dp)),
-                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.15f),
-                colors = ClickableSurfaceDefaults.colors(
-                    containerColor = Color.Transparent,
-                    contentColor = Palette.Secondary,
-                    focusedContainerColor = Palette.Ink,
-                    focusedContentColor = Color.White,
-                ),
-            ) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(letter.toString(), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+private fun LetterRail(letters: List<Pair<Char, Int>>, modifier: Modifier, onJump: (Int) -> Unit) {
+    val firsts = remember(letters) { letters.toMap() }
+    var focused by remember { mutableStateOf<Int?>(null) }
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.size(64.dp)) {
+            focused?.let { i ->
+                Box(
+                    Modifier
+                        .offset(y = LETTER_HEIGHT * i + 6.dp + LETTER_HEIGHT / 2 - 32.dp)
+                        .size(64.dp)
+                        .background(Palette.Control.copy(alpha = 0.92f), RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center,
+                ) { Text(ALPHABET[i].toString(), fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Palette.Ink) }
+            }
+        }
+        Column(
+            Modifier.width(32.dp).background(Palette.Control.copy(alpha = 0.75f), CircleShape).padding(vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            ALPHABET.forEachIndexed { i, letter ->
+                val first = firsts[letter]
+                if (first == null) {
+                    Box(Modifier.size(24.dp, LETTER_HEIGHT), contentAlignment = Alignment.Center) {
+                        Text(letter.toString(), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Palette.Secondary.copy(alpha = 0.4f))
+                    }
+                    return@forEachIndexed
+                }
+                Surface(
+                    onClick = { onJump(first) },
+                    modifier = Modifier
+                        .size(24.dp, LETTER_HEIGHT)
+                        .onFocusChanged { if (it.isFocused) focused = i else if (focused == i) focused = null }
+                        .onPreviewKeyEvent { e ->
+                            if (e.key != Key.DirectionLeft) return@onPreviewKeyEvent false
+                            if (e.type == KeyEventType.KeyDown) onJump(first)
+                            true
+                        },
+                    shape = ClickableSurfaceDefaults.shape(CircleShape),
+                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.2f),
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = Color.Transparent,
+                        contentColor = Palette.Ink,
+                        focusedContainerColor = Palette.Ink,
+                        focusedContentColor = Palette.OnInk,
+                    ),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(letter.toString(), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }

@@ -4,6 +4,22 @@ package com.ember.simpleplex.ui
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.Icon
+import androidx.tv.material3.LocalContentColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -58,7 +74,19 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Libraries on Home, caches, the server, and which build this is. Reached from Home's Settings tile. */
+private enum class Section(val title: String, val icon: ImageVector, val about: String) {
+    Update("Update", Icons.Next, "A newer version is on GitHub. Android asks to confirm the install (and, the first time, to allow Simplex to install apps)."),
+    Appearance("Appearance", Icons.Sun, "Light, dark, or dark between sunset and sunrise where the server is. OK switches."),
+    Libraries("Libraries on Home", Icons.Folder, "Checked libraries are shown on Home; hidden ones keep their place for when they come back."),
+    Server("Server", Icons.Tv, "The Plex server this TV plays from, and waking it up when it's asleep."),
+    Storage("Storage", Icons.Disk, "Preview thumbnails, the search copy of your libraries and artwork, kept on the TV to load faster. OK clears them."),
+    Account("Account", Icons.Account, "Signing out lets you sign in again and pick up a different server."),
+}
+
+/**
+ * The sections as a list on the right, tvOS style, with a big picture of the focused one on the left.
+ * OK switches or clears in place; sections with more than one control open in the list's place.
+ */
 @Composable
 fun SettingsScreen(plex: PlexClient, nav: Nav) {
     val context = LocalContext.current
@@ -69,82 +97,168 @@ fun SettingsScreen(plex: PlexClient, nav: Nav) {
     val libraries by load(Unit) { requireNotNull(plex.home).libraries() }
     var cleared by remember { mutableStateOf(0) }
     val cacheSize by produceState<Long?>(null, cleared) { value = withContext(Dispatchers.IO) { Caches.size(context) } }
+    val update by produceState<Updates.Release?>(null) { value = Updates.newerCached() }
+    var installing by remember { mutableStateOf<String?>(null) }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 48.dp, vertical = 40.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        ScreenTitle("Settings")
+    var focused by remember { mutableStateOf(Section.Appearance) }
+    var open by remember { mutableStateOf<Section?>(null) }
+    val back = remember { FocusRequester() }
+    val inside = remember { FocusRequester() }
+    BackHandler(enabled = open != null) { open = null }
+    var opened by remember { mutableStateOf(false) }
+    LaunchedEffect(open) {
+        if (!opened) return@LaunchedEffect // first visit: remembersFocus picks the row
+        withFrameNanos { }
+        runCatching { if (open != null) inside.requestFocus() else back.requestFocus() }
+    }
 
-        SectionTitle("Libraries on Home", Modifier.padding(top = 10.dp))
-        val libs = libraries?.getOrNull()
-        when {
-            libraries?.isFailure == true -> Note("Couldn't reach your Plex server to list the libraries.")
-            libs == null -> Note("Loading…")
-            else -> {
-                Note("Checked libraries are shown on Home; hidden ones keep their place for when they come back.")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    libs.forEachIndexed { i, lib ->
-                        PillButton(
-                            label = lib.title,
-                            selected = lib.key !in hidden,
-                            onClick = {
-                                hidden = if (lib.key in hidden) hidden - lib.key else hidden + lib.key
-                                prefs.hidden = hidden
-                            },
-                            modifier = Modifier.remembersFocus(memory, "lib" + lib.key, default = i == 0),
-                        )
+    val libs = libraries?.getOrNull()
+    fun value(section: Section): String = when (section) {
+        Section.Update -> installing ?: "Install ${update?.version}"
+        Section.Appearance -> when (Palette.mode) {
+            ThemeMode.Light -> "Light"
+            ThemeMode.Dark -> "Dark"
+            ThemeMode.Auto -> "Auto · dark after sunset"
+        }
+        Section.Libraries -> when {
+            libraries?.isFailure == true -> "Server unreachable"
+            libs == null -> "…"
+            else -> "${libs.count { it.key !in hidden }} of ${libs.size} shown"
+        }
+        Section.Server -> plex.home?.uri?.substringAfter("://")?.substringBefore(":") ?: "—"
+        Section.Storage -> cacheSize?.let(ItemInfo::size) ?: "…"
+        Section.Account -> "Signed in"
+    }
+    fun click(section: Section) {
+        when (section) {
+            Section.Update -> if (installing == null) update?.let { release ->
+                installing = "Downloading…"
+                scope.launch {
+                    installing = try {
+                        Updates.install(context, release)
+                        "Waiting for Android…"
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        "Couldn't install: ${e.message}"
                     }
                 }
             }
+            Section.Appearance -> {
+                // Picking Auto looks up the place again.
+                val next = ThemeMode.entries[(Palette.mode.ordinal + 1) % ThemeMode.entries.size]
+                if (next == ThemeMode.Auto) ThemePrefs(context).place = null
+                Palette.mode = next
+            }
+            Section.Storage -> scope.launch {
+                withContext(Dispatchers.IO) { Caches.clear(context) }
+                cleared++
+            }
+            else -> { opened = true; open = section }
         }
+    }
 
-        SectionTitle("Storage", Modifier.padding(top = 10.dp))
-        Note("Preview thumbnails, the search copy of your libraries and artwork, kept on the TV to load faster.")
-        PillButton(
-            label = "Clear caches" + (cacheSize?.let { " · ${ItemInfo.size(it)}" } ?: ""),
-            onClick = {
-                scope.launch {
-                    withContext(Dispatchers.IO) { Caches.clear(context) }
-                    cleared++
-                }
-            },
-            modifier = Modifier.remembersFocus(memory, "caches"),
+    Box(Modifier.fillMaxSize()) {
+        Text(
+            "Settings", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Palette.Ink,
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 26.dp),
         )
 
-        SectionTitle("Server", Modifier.padding(top = 10.dp))
-        Note("Connected to ${plex.home?.uri ?: "—"}. Signing out lets you sign in again and pick up a different server.")
-        PillButton("Sign out", { plex.signOut(); nav.signOut() }, Modifier.remembersFocus(memory, "signout"))
+        val shown = open ?: focused
+        Column(
+            Modifier.width(435.dp).fillMaxHeight(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
+        ) {
+            Box(Modifier.size(165.dp).background(Palette.Tile, RoundedCornerShape(36.dp)), contentAlignment = Alignment.Center) {
+                Icon(shown.icon, contentDescription = null, tint = Palette.Ink, modifier = Modifier.size(90.dp))
+            }
+            Text(
+                shown.about, fontSize = 12.sp, color = Palette.Secondary, textAlign = TextAlign.Center,
+                lineHeight = 17.sp, modifier = Modifier.width(255.dp),
+            )
+        }
 
-        SectionTitle("Wake server", Modifier.padding(top = 10.dp))
-        Note("The server's network (MAC) address, for the Wake server button when it's asleep. Plex doesn't report it and Android doesn't let apps look it up, so it's typed here, e.g. 20:07:11:1a:19:86 (the separators can be left out).")
-        MacField(plex, Modifier.remembersFocus(memory, "mac"))
-
-        SectionTitle("About", Modifier.padding(top = 10.dp))
-        Note(Build.describe(context))
-        val update by produceState<Updates.Release?>(null) { value = Updates.newerCached() }
-        var installing by remember { mutableStateOf<String?>(null) }
-        update?.let { release ->
-            Note("Version ${release.version} is available on GitHub. Android asks to confirm the install (and, the first time, to allow Simplex to install apps).")
-            PillButton(
-                label = installing ?: "Install ${release.version}",
-                onClick = {
-                    if (installing == null) {
-                        installing = "Downloading…"
-                        scope.launch {
-                            installing = try {
-                                Updates.install(context, release)
-                                "Waiting for Android…"
-                            } catch (e: kotlinx.coroutines.CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                "Couldn't install: ${e.message}"
+        Column(
+            Modifier.padding(start = 450.dp, top = 78.dp, end = 48.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            when (open) {
+                null -> {
+                    Section.entries.filter { it != Section.Update || update != null }.forEach { section ->
+                        SettingsRow(
+                            section.title, value(section), section.icon, { click(section) },
+                            Modifier
+                                .then(if (section == focused) Modifier.focusRequester(back) else Modifier)
+                                .onFocusChanged { if (it.isFocused) focused = section }
+                                .remembersFocus(memory, section.name, default = section == if (update != null) Section.Update else Section.Appearance),
+                        )
+                    }
+                    Text(
+                        Build.describe(context) + " · the TV's own screensaver is used",
+                        fontSize = 10.sp, color = Palette.Secondary, modifier = Modifier.padding(start = 15.dp, top = 8.dp),
+                    )
+                }
+                Section.Libraries -> {
+                    SectionTitle(Section.Libraries.title)
+                    when {
+                        libraries?.isFailure == true -> Note("Couldn't reach your Plex server to list the libraries.")
+                        libs == null -> Note("Loading…")
+                        else -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            libs.forEachIndexed { i, lib ->
+                                PillButton(
+                                    label = lib.title,
+                                    selected = lib.key !in hidden,
+                                    onClick = {
+                                        hidden = if (lib.key in hidden) hidden - lib.key else hidden + lib.key
+                                        prefs.hidden = hidden
+                                    },
+                                    modifier = if (i == 0) Modifier.focusRequester(inside) else Modifier,
+                                )
                             }
                         }
                     }
-                },
-                modifier = Modifier.remembersFocus(memory, "update", default = true),
-            )
+                }
+                Section.Server -> {
+                    SectionTitle(Section.Server.title)
+                    Note("Connected to ${plex.home?.uri ?: "—"}.")
+                    Note("The server's network (MAC) address, for the Wake server button when it's asleep. Plex doesn't report it and Android doesn't let apps look it up, so it's typed here, e.g. 20:07:11:1a:19:86 (the separators can be left out).")
+                    MacField(plex, Modifier.focusRequester(inside))
+                }
+                Section.Account -> {
+                    SectionTitle(Section.Account.title)
+                    Note("Signed in to plex.tv.")
+                    Row { PillButton("Sign out", { plex.signOut(); nav.signOut() }, Modifier.focusRequester(inside)) }
+                }
+                else -> {}
+            }
+        }
+    }
+}
+
+/** One line of the Settings list: icon, name, the current value, and a chevron. Light, dark when focused. */
+@Composable
+private fun SettingsRow(label: String, value: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.width(450.dp).height(40.dp),
+        contentPadding = PaddingValues(horizontal = 15.dp),
+        shape = ButtonDefaults.shape(RoundedCornerShape(9.dp)),
+        scale = ButtonDefaults.scale(focusedScale = 1.04f),
+        colors = ButtonDefaults.colors(
+            containerColor = Palette.Tile,
+            contentColor = Palette.Ink,
+            focusedContainerColor = Palette.Ink,
+            focusedContentColor = Palette.OnInk,
+        ),
+    ) {
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.weight(1f))
+            val dim = LocalContentColor.current.copy(alpha = 0.65f)
+            Text(value, fontSize = 11.sp, color = dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("›", fontSize = 15.sp, color = dim)
         }
     }
 }

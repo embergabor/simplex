@@ -53,6 +53,7 @@ import com.ember.simpleplex.ui.Screen
 import com.ember.simpleplex.ui.SearchScreen
 import com.ember.simpleplex.ui.ShowScreen
 import com.ember.simpleplex.ui.SettingsScreen
+import com.ember.simpleplex.ui.introSkipped
 import com.ember.simpleplex.ui.VerseGridScreen
 import com.ember.simpleplex.ui.VerseVideosScreen
 import com.ember.simpleplex.ui.Message
@@ -92,6 +93,7 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         RemoteKeys.repeating = event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0
+        if (event.action == KeyEvent.ACTION_DOWN) introSkipped = true
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT -> { RemoteKeys.dx = -1; RemoteKeys.dy = 0 }
             KeyEvent.KEYCODE_DPAD_RIGHT -> { RemoteKeys.dx = 1; RemoteKeys.dy = 0 }

@@ -10,15 +10,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,7 +26,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -43,6 +33,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +47,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -62,40 +63,72 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import com.ember.simpleplex.plex.Library
 import com.ember.simpleplex.plex.PlexClient
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Home | PlexVerse | Kids, at the top of each of the three. Kids only once PlexVerse is set up with
- * kids kept separate.
+ * The menu at the top of Home, PlexVerse and Kids: a capsule in the middle, tvOS style, with Search,
+ * Home | PlexVerse | Kids, and Settings. Kids only once PlexVerse is set up with kids kept separate;
+ * on Kids, no Search or Settings.
  */
 @Composable
 fun TopMenu(current: Screen, nav: Nav, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val setup = PlexVersePrefs(context).setup
-    Row(modifier.fillMaxWidth().padding(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        PillButton("Home", { nav.push(Screen.Home) }, selected = current == Screen.Home)
-        PillButton("PlexVerse", { nav.push(Screen.PlexVerse) }, selected = current == Screen.PlexVerse)
-        if (setup.isSetUp && setup.kidsSeparate) {
-            PillButton("Kids", { nav.push(Screen.Kids) }, icon = Icons.Smile, selected = current == Screen.Kids, accent = Palette.Kids)
+    val setup = PlexVersePrefs(LocalContext.current).setup
+    val kids = setup.isSetUp && setup.kidsSeparate
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Row(
+            Modifier.background(Palette.Control.copy(alpha = 0.75f), CircleShape).padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (current != Screen.Kids) MenuItem(null, Icons.Search, "Search", selected = false) { nav.push(Screen.Search) }
+            MenuItem("Home", null, null, current == Screen.Home) { nav.push(Screen.Home) }
+            MenuItem("PlexVerse", null, null, current == Screen.PlexVerse) { nav.push(Screen.PlexVerse) }
+            if (kids) MenuItem("Kids", Icons.Smile, null, current == Screen.Kids, kids = true) { nav.push(Screen.Kids) }
+            if (current != Screen.Kids) MenuItem(null, Icons.Settings, "Settings", selected = false) { nav.push(Screen.Settings) }
         }
-        Spacer(Modifier.weight(1f))
-        // Each OK moves to the next mode; picking Auto looks up the place again.
-        val icon = when (Palette.mode) { ThemeMode.Light -> Icons.Sun; ThemeMode.Dark -> Icons.Moon; ThemeMode.Auto -> Icons.Sunset }
-        IconPillButton(icon, "Theme: ${Palette.mode.name}", {
-            val next = ThemeMode.entries[(Palette.mode.ordinal + 1) % ThemeMode.entries.size]
-            if (next == ThemeMode.Auto) ThemePrefs(context).place = null
-            Palette.mode = next
-        })
+    }
+}
+
+/** One capsule in [TopMenu]: filled when it's the current screen or focused; Kids in its orange. */
+@Composable
+private fun MenuItem(label: String?, icon: ImageVector?, description: String?, selected: Boolean, kids: Boolean = false, onClick: () -> Unit) {
+    // The orange reads on the dark ground; on the light one a deeper orange does.
+    val kidsText = if (Palette.Ground.luminance() < 0.5f) Palette.Kids else Color(0xFF9A5B00)
+    val fill = if (kids) Palette.Kids else Palette.Ink
+    val onFill = if (kids) Color(0xFF2A1A00) else Palette.OnInk
+    Button(
+        onClick = onClick,
+        modifier = Modifier.height(32.dp),
+        contentPadding = PaddingValues(horizontal = if (label == null) 12.dp else 15.dp),
+        shape = ButtonDefaults.shape(CircleShape),
+        scale = ButtonDefaults.scale(focusedScale = 1.1f),
+        colors = ButtonDefaults.colors(
+            containerColor = if (selected) fill else Color.Transparent,
+            contentColor = if (selected) onFill else if (kids) kidsText else Palette.Ink,
+            focusedContainerColor = fill,
+            focusedContentColor = onFill,
+        ),
+    ) {
+        if (icon != null) Icon(icon, contentDescription = description, modifier = Modifier.size(if (label == null) 15.dp else 13.dp))
+        if (icon != null && label != null) Spacer(Modifier.width(6.dp))
+        if (label != null) Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -277,6 +310,7 @@ fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
         else -> "Movies"
     }
     var menuFor by remember { mutableStateOf<VerseEntry?>(null) }
+    var surprise by remember { mutableStateOf(false) }
     val grid = rememberLazyGridState()
     // The poster from the first source whose server has answered.
     val poster: (VerseEntry) -> String? = { entry ->
@@ -304,7 +338,12 @@ fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
                     }) {
                         Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                             TopMenu(Screen.Kids, nav)
-                            ContinueRow(plex, store, kids = true, nav, memory)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (entries.isNotEmpty()) {
+                                    SurpriseButton({ surprise = true }, Modifier.padding(start = 48.dp).remembersFocus(memory, "surprise", default = true))
+                                }
+                                ContinueRow(plex, store, kids = true, nav, memory)
+                            }
                         }
                     }
                 }
@@ -342,6 +381,7 @@ fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
         val copies = entry.sources.mapNotNull { s -> connected[s.machineId]?.let { Copy(it, s.item) } }
         ItemMenu(copies.first().server, entry.item, nav, copies = copies, playFrom = true) { menuFor = null }
     }
+    if (surprise) Surprise(entries, connected, nav) { surprise = false }
 }
 
 /**

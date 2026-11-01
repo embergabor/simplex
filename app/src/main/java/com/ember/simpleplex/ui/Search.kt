@@ -2,7 +2,6 @@
 
 package com.ember.simpleplex.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -55,10 +54,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
-import androidx.tv.material3.Border
-import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Icon
-import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Library
@@ -76,24 +72,6 @@ import kotlinx.coroutines.coroutineScope
 
 private const val SEARCH_HINT = "Search titles, or words from an episode's description"
 private val fieldShape = RoundedCornerShape(12.dp)
-
-/** The search field's row on Home. It only looks like a text field: OK opens Search, ready to type. */
-@Composable
-fun SearchBox(onOpen: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        onClick = onOpen,
-        modifier = modifier.fillMaxWidth().height(52.dp),
-        shape = ClickableSurfaceDefaults.shape(fieldShape),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
-        colors = ClickableSurfaceDefaults.colors(containerColor = Palette.Tile, focusedContainerColor = Palette.Tile),
-        border = ClickableSurfaceDefaults.border(focusedBorder = Border(BorderStroke(3.dp, Palette.Ink), shape = fieldShape)),
-    ) {
-        Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Search, contentDescription = null, tint = Palette.Secondary, modifier = Modifier.size(20.dp))
-            Text(SEARCH_HINT, modifier = Modifier.padding(start = 12.dp), fontSize = 16.sp, color = Palette.Secondary, maxLines = 1)
-        }
-    }
-}
 
 /** Episodes listed per show at most; a broader word than that needs narrowing down anyway. */
 private const val MAX_EPISODES = 100
