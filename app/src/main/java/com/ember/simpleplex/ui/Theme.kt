@@ -1,6 +1,9 @@
 package com.ember.simpleplex.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -11,18 +14,40 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.lightColorScheme
 
+/** Light, Dark, or Auto: dark between sunset and sunrise. Picked in the top menu, see [FollowTheme]. */
+enum class ThemeMode { Light, Dark, Auto }
+
+class Colors(
+    val ground: Color, val ink: Color, val secondary: Color, val tile: Color,
+    val control: Color, val divider: Color, val placeholder: Color, val onInk: Color,
+)
+
 /**
- * A constant mid grey rather than white: a bright full screen makes the TV keep adjusting its
- * brightness. Nothing on screen is pure white except the focus ring and text on dark.
+ * A constant mid grey rather than white, and a dark grey rather than black: a bright or pure black
+ * full screen makes the TV keep adjusting its brightness.
+ * Each colour reads [current], so switching it recomposes every screen.
  */
 object Palette {
-    val Ground = Color(0xFFBEBEC3)
-    val Ink = Color(0xFF1C1C1E)
-    val Secondary = Color(0xFF46464C)
-    val Tile = Color(0xFFDCDCE0)
-    val Control = Color(0xFFCDCDD2)
-    val Divider = Color(0xFFA4A4AA)
-    val Placeholder = Color(0xFFADADB3)
+    val Light = Colors(
+        ground = Color(0xFFBEBEC3), ink = Color(0xFF1C1C1E), secondary = Color(0xFF46464C), tile = Color(0xFFDCDCE0),
+        control = Color(0xFFCDCDD2), divider = Color(0xFFA4A4AA), placeholder = Color(0xFFADADB3), onInk = Color.White,
+    )
+    val Dark = Colors(
+        ground = Color(0xFF1C1C1E), ink = Color(0xFFE6E6EA), secondary = Color(0xFF9A9AA0), tile = Color(0xFF2C2C2E),
+        control = Color(0xFF3A3A3C), divider = Color(0xFF48484C), placeholder = Color(0xFF38383C), onInk = Color(0xFF1C1C1E),
+    )
+    var current by mutableStateOf(Light)
+    var mode by mutableStateOf(ThemeMode.Light)
+
+    val Ground get() = current.ground
+    val Ink get() = current.ink
+    val Secondary get() = current.secondary
+    val Tile get() = current.tile
+    val Control get() = current.control
+    val Divider get() = current.divider
+    val Placeholder get() = current.placeholder
+    /** Text and icons on [Ink], as on focused buttons. */
+    val OnInk get() = current.onInk
 }
 
 @Composable
@@ -30,7 +55,7 @@ fun AppTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = lightColorScheme(
             primary = Palette.Ink,
-            onPrimary = Color.White,
+            onPrimary = Palette.OnInk,
             background = Palette.Ground,
             onBackground = Palette.Ink,
             surface = Palette.Tile,

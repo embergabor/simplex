@@ -357,7 +357,7 @@ private fun Progress(progress: Float, modifier: Modifier) {
 @Composable
 private fun WatchedBadge(modifier: Modifier) {
     Box(modifier.size(17.dp).background(Color.White.copy(alpha = 0.92f), CircleShape), contentAlignment = Alignment.Center) {
-        Icon(Icons.Check, contentDescription = "Watched", tint = Palette.Ink, modifier = Modifier.size(10.dp))
+        Icon(Icons.Check, contentDescription = "Watched", tint = Palette.Light.ink, modifier = Modifier.size(10.dp))
     }
 }
 
@@ -574,7 +574,7 @@ fun IconTile(
             containerColor = Palette.Tile,
             contentColor = Palette.Ink,
             focusedContainerColor = Palette.Ink,
-            focusedContentColor = Color.White,
+            focusedContentColor = Palette.OnInk,
         ),
     ) {
         if (horizontal) {
@@ -612,7 +612,7 @@ fun PillButton(
             containerColor = Palette.Control,
             contentColor = Palette.Ink,
             focusedContainerColor = Palette.Ink,
-            focusedContentColor = Color.White,
+            focusedContentColor = Palette.OnInk,
         ),
     ) {
         if (icon != null) {
@@ -641,7 +641,7 @@ fun IconPillButton(icon: ImageVector, description: String, onClick: (() -> Unit)
             containerColor = Palette.Control,
             contentColor = Palette.Ink,
             focusedContainerColor = Palette.Ink,
-            focusedContentColor = Color.White,
+            focusedContentColor = Palette.OnInk,
             disabledContainerColor = Palette.Control.copy(alpha = 0.5f),
             disabledContentColor = Palette.Ink.copy(alpha = 0.3f),
         ),

@@ -63,13 +63,21 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 @Composable
 fun TopMenu(current: Screen, nav: Nav, modifier: Modifier = Modifier) {
-    val setup = PlexVersePrefs(LocalContext.current).setup
-    Row(modifier.padding(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    val context = LocalContext.current
+    val setup = PlexVersePrefs(context).setup
+    Row(modifier.fillMaxWidth().padding(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         PillButton("Home", { nav.push(Screen.Home) }, selected = current == Screen.Home)
         PillButton("PlexVerse", { nav.push(Screen.PlexVerse) }, selected = current == Screen.PlexVerse)
         if (setup.isSetUp && setup.kidsSeparate) {
             PillButton("Kids", { nav.push(Screen.Kids) }, selected = current == Screen.Kids)
         }
+        Spacer(Modifier.weight(1f))
+        // Each OK moves to the next mode; picking Auto looks up the place again.
+        PillButton(Palette.mode.name, {
+            val next = ThemeMode.entries[(Palette.mode.ordinal + 1) % ThemeMode.entries.size]
+            if (next == ThemeMode.Auto) ThemePrefs(context).place = null
+            Palette.mode = next
+        })
     }
 }
 
