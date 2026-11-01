@@ -10,8 +10,24 @@ import java.io.IOException
 import java.net.URLEncoder
 import java.util.UUID
 
-/** One Plex Media Server, reached at [uri] with that server's own access [token]. */
-class PlexServer(val uri: String, val token: String, val machineId: String?, private val client: PlexClient, val name: String = "") {
+/**
+ * One Plex Media Server, reached at [uri] with that server's own access [token]. The address can move
+ * (plex.direct names carry the server's IP, and home connections get new public IPs): a request that
+ * can't reach the server looks up where it is now and tries once more there.
+ */
+class PlexServer(uri: String, val token: String, val machineId: String?, private val client: PlexClient, val name: String = "") {
+
+    @Volatile var uri: String = uri
+        internal set
+
+    private suspend fun <T> reaching(block: suspend () -> T): T {
+        val tried = uri
+        return try {
+            block()
+        } catch (e: IOException) {
+            if (client.relocate(this, tried)) block() else throw e
+        }
+    }
 
     /** An item on this server as the player's queue takes it: "machineId|ratingKey", or the bare key if the id isn't known. */
     fun ref(ratingKey: String) = machineId?.let { "$it|$ratingKey" } ?: ratingKey
@@ -19,14 +35,13 @@ class PlexServer(val uri: String, val token: String, val machineId: String?, pri
     /** For reports that must outlive a screen (timeline, watched state). */
     fun fire(block: suspend PlexServer.() -> Unit) = client.fire { block() }
 
-    private suspend fun get(path: String): JSONObject {
-        val req = client.request(uri + path, token).build()
-        return JSONObject(client.call(req)).optJSONObject("MediaContainer") ?: JSONObject()
+    private suspend fun get(path: String): JSONObject = reaching {
+        JSONObject(client.call(client.request(uri + path, token).build())).optJSONObject("MediaContainer") ?: JSONObject()
     }
 
     private suspend fun send(path: String, method: String = "GET") {
         val body = if (method == "GET") null else ByteArray(0).toRequestBody()
-        client.call(client.request(uri + path, token).method(method, body).build())
+        reaching { client.call(client.request(uri + path, token).method(method, body).build()) }
     }
 
     // --- Library ---
@@ -48,7 +63,7 @@ class PlexServer(val uri: String, val token: String, val machineId: String?, pri
      */
     suspend fun libraryJson(sectionKey: String, episodes: Boolean): String {
         val path = "/library/sections/$sectionKey/all?" + if (episodes) "type=4" else "sort=titleSort&includeGuids=1"
-        return client.call(client.request(uri + path, token).build())
+        return reaching { client.call(client.request(uri + path, token).build()) }
     }
 
     /** A show's episodes. Their library comes from the list itself, since the episodes may not say. */

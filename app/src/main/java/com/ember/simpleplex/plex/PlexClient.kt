@@ -8,6 +8,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -158,13 +160,39 @@ class PlexClient private constructor(context: Context) {
         home?.takeIf { it.machineId == machineId }?.let { return it }
         val info = (cachedServers.find { it.machineId == machineId } ?: runCatching { servers() }.getOrNull()?.find { it.machineId == machineId }) ?: return null
         val hint = prefs.getString("uri-$machineId", null)
-        val candidates = listOfNotNull(hint) + info.uris
-        val uri = channelFlow {
-            candidates.distinct().forEach { launch { if (probe(it, info.accessToken)) send(it) } }
-        }.firstOrNull() ?: return null
+        val uri = firstAnswering(listOfNotNull(hint) + info.uris, info.accessToken)
+            // The saved list may be out of date (a new IP): ask plex.tv where the server is now.
+            ?: runCatching { servers() }.getOrNull()?.find { it.machineId == machineId }?.let { firstAnswering(it.uris, it.accessToken) }
+            ?: return null
         prefs.edit().putString("uri-$machineId", uri).apply()
         return PlexServer(uri, info.accessToken, machineId, this, info.name).also { connected[machineId] = it }
     }
+
+    private val relocating = ConcurrentHashMap<String, Mutex>()
+
+    /**
+     * After a request to [server] at [failed] didn't go through: finds where the server answers now,
+     * from plex.tv's current list, and moves [server] there (saved for next time). True if it moved, so
+     * the request is worth repeating. A server that still answers at [failed] stays (the request failed
+     * for another reason). One lookup per server at a time; the requests waiting on it reuse its answer.
+     */
+    internal suspend fun relocate(server: PlexServer, failed: String): Boolean {
+        val id = server.machineId ?: return false
+        return relocating.computeIfAbsent(id) { Mutex() }.withLock {
+            if (server.uri != failed) return@withLock true
+            if (probe(failed, server.token)) return@withLock false
+            val info = runCatching { servers() }.getOrNull()?.find { it.machineId == id } ?: return@withLock false
+            val uri = firstAnswering(info.uris - failed, server.token) ?: return@withLock false
+            server.uri = uri
+            prefs.edit().putString(if (server === home) "serverUri" else "uri-$id", uri).apply()
+            true
+        }
+    }
+
+    /** Tries every address at once; the first that answers, or null. */
+    private suspend fun firstAnswering(uris: List<String>, token: String): String? = channelFlow {
+        uris.distinct().forEach { launch { if (probe(it, token)) send(it) } }
+    }.firstOrNull()
 
     private suspend fun probe(uri: String, token: String) = runCatching {
         call(Request.Builder().url("$uri/identity").plexHeaders(token).build(), probeHttp)
