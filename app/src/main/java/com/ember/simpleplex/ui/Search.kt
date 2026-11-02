@@ -143,9 +143,15 @@ private fun index(lists: List<LibraryLists>): List<LibraryIndex> = lists.map { l
  * match by title; episodes also by their description, so "bolivia" finds the Top Gear special. Matching
  * runs on the TV against a saved copy of the libraries, which is refreshed in the background on opening.
  */
+/** What the remote's mic heard, for Search to take as its query (set by MainActivity). */
+object VoiceSearch {
+    var heard by mutableStateOf<String?>(null)
+}
+
 @Composable
 fun SearchScreen(plex: PlexServer, nav: Nav) {
     val context = LocalContext.current
+    val blur = remember { ViewPrefs(context).blurUnwatched }
     val hidden = remember { LibraryPrefs(context).hidden }
     val cache = remember { SearchCache(context, plex) }
     var loaded by remember { mutableStateOf<Result<List<LibraryIndex>>?>(null) }
@@ -205,8 +211,18 @@ fun SearchScreen(plex: PlexServer, nav: Nav) {
         }
     }
 
+    // Spoken, it's a finished search: no keyboard.
+    LaunchedEffect(VoiceSearch.heard) {
+        val heard = VoiceSearch.heard ?: return@LaunchedEffect
+        VoiceSearch.heard = null
+        query = heard
+        recent = history.add(heard)
+        typing = false
+        keyboard?.hide()
+    }
+
     LaunchedEffect(Unit) {
-        if (query.isEmpty()) {
+        if (query.isEmpty() && VoiceSearch.heard == null) {
             withFrameNanos { }
             runCatching { field.requestFocus() }
             typing = true
@@ -298,7 +314,7 @@ fun SearchScreen(plex: PlexServer, nav: Nav) {
             found == null -> hint("Loading your libraries…")
             found.isEmpty() -> hint("Nothing found for “${query.trim()}”.")
             // Opening a result counts the search as used.
-            else -> for (f in found) results(plex, nav.alsoOnOpen(saveSearch), f) { menuFor = it }
+            else -> for (f in found) results(plex, nav.alsoOnOpen(saveSearch), f, blur) { menuFor = it }
         }
     }
     menuFor?.let { ItemMenu(plex, it, nav) { menuFor = null } }
@@ -345,7 +361,7 @@ private fun LazyGridScope.hint(text: String) = item(span = { GridItemSpan(maxLin
 }
 
 /** One library's matches: its titles, then (for TV) the matching episodes. */
-private fun LazyGridScope.results(plex: PlexServer, nav: Nav, f: Found, onMenu: (Item) -> Unit) {
+private fun LazyGridScope.results(plex: PlexServer, nav: Nav, f: Found, blur: Boolean, onMenu: (Item) -> Unit) {
     val lib = f.library
     item(span = { GridItemSpan(maxLineSpan) }, key = "h" + lib.key) {
         SectionTitle(lib.title, Modifier.padding(top = 8.dp))
@@ -370,6 +386,7 @@ private fun LazyGridScope.results(plex: PlexServer, nav: Nav, f: Found, onMenu: 
                 imageUrl = plex.image(item.thumb, 248, 372),
                 progress = item.progress,
                 watched = item.watched,
+                unwatched = item.unwatchedEpisodes,
                 onClick = open,
                 onLongClick = { onMenu(item) },
             )
@@ -389,7 +406,7 @@ private fun LazyGridScope.results(plex: PlexServer, nav: Nav, f: Found, onMenu: 
                     ) {
                         rowItems(episodes, key = { it.ratingKey }) { ep ->
                             WideCard(
-                                imageUrl = plex.image(ep.thumb, 352, 198),
+                                imageUrl = plex.image(ep.thumb, 352, 198, blur = blur && ep.unseen),
                                 title = ep.title,
                                 subtitle = ep.episodeLabel,
                                 subtitleFirst = true,

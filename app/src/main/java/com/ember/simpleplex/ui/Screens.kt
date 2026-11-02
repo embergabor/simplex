@@ -167,6 +167,7 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
     val libs by load(refresh) { plex.libraries() }
     val cont by load(refresh) { plex.continueWatching() }
     val memory = rememberFocusMemory()
+    val playedFrom = rememberPlayedFrom()
     var menuFor by remember { mutableStateOf<Item?>(null) }
 
     val context = LocalContext.current
@@ -192,6 +193,8 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
                     SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
                     val first = remember { FocusRequester() }
                     val rowState = rememberLazyListState()
+                    val keys = continuing.map { it.ratingKey }
+                    LaunchedEffect(keys) { playedFrom.follow(rowState, keys) }
                     PinnedRow {
                         LazyRow(
                             state = rowState,
@@ -208,10 +211,11 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
                                     progress = item.progress,
                                     watched = false,
                                     // The one place, with the show page's Play, that continues where it was left.
-                                    onClick = { nav.play(listOf(item.ratingKey), resume = true) },
+                                    onClick = { playedFrom.played(item.ratingKey); nav.play(listOf(item.ratingKey), resume = true) },
                                     onLongClick = { menuFor = item },
                                     width = 200.dp,
                                     modifier = Modifier
+                                        .focusRequester(playedFrom.requester(item.ratingKey))
                                         .then(if (item == continuing.first()) Modifier.focusRequester(first) else Modifier)
                                         .remembersFocus(memory, "c" + item.ratingKey, default = item == continuing.first()),
                                 )
@@ -327,6 +331,7 @@ fun GridScreen(plex: PlexServer, library: Library, nav: Nav) {
                     imageUrl = plex.image(item.thumb, 248, 372),
                     progress = item.progress,
                     watched = item.watched,
+                    unwatched = item.unwatchedEpisodes,
                     onClick = {
                         if (library.kind == Library.Kind.SHOWS) nav.push(Screen.Show(item)) else nav.play(listOf(item.ratingKey))
                     },
@@ -458,6 +463,8 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
     }
     val memory = rememberFocusMemory()
     var menuFor by remember { mutableStateOf<ShowEpisode?>(null) }
+    val context = LocalContext.current
+    val blur = remember(refresh) { ViewPrefs(context).blurUnwatched }
     val (episodes, favorites) = result?.getOrElse { return ErrorMessage("Couldn't load ${show.title}.\n${it.message}") } ?: return
     if (episodes.isEmpty()) return Message("${show.title} has no episodes.")
 
@@ -518,7 +525,7 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
                         ) {
                             itemsIndexed(favorites, key = { _, ep -> ep.key }) { i, ep ->
                                 WideCard(
-                                    imageUrl = ep.server.image(ep.item.thumb, 352, 198),
+                                    imageUrl = ep.server.image(ep.item.thumb, 352, 198, blur = blur && ep.item.unseen),
                                     title = ep.item.title,
                                     subtitle = ep.item.episodeLabel,
                                     subtitleFirst = true,
@@ -554,7 +561,7 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
                         ) {
                             items(eps, key = { it.key }) { ep ->
                                 WideCard(
-                                    imageUrl = ep.server.image(ep.item.thumb, 352, 198),
+                                    imageUrl = ep.server.image(ep.item.thumb, 352, 198, blur = blur && ep.item.unseen),
                                     title = ep.item.title,
                                     subtitle = listOfNotNull("Episode ${ep.item.index ?: ""}", ep.item.airDate?.let(ItemInfo::date)).joinToString(" · "),
                                     subtitleFirst = true,

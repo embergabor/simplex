@@ -65,6 +65,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -183,6 +184,42 @@ fun Modifier.remembersFocus(memory: FocusMemory, key: String, default: Boolean =
     return this
         .focusRequester(requester)
         .onFocusChanged { if (it.isFocused) memory.focused(key) }
+}
+
+/**
+ * Gives focus back to the Continue watching card a video was started from once the player closes. The
+ * row changes while it plays: the title moves to the front, or leaves once finished. The card it was on
+ * then scrolls off or goes, and focus with it. Here the row follows the title, or the card that took its
+ * place.
+ */
+class PlayedFrom(private val played: MutableState<String?>) {
+    private val requesters = mutableMapOf<String, FocusRequester>()
+    private var keys: List<String>? = null
+
+    /** For the card with this key. */
+    fun requester(key: String): FocusRequester = requesters.getOrPut(key) { FocusRequester() }
+
+    /** The card with this key starts a video. */
+    fun played(key: String) { played.value = key }
+
+    /** Called with the row's keys each time they change. */
+    suspend fun follow(state: LazyListState, now: List<String>) {
+        val before = keys
+        keys = now
+        val key = played.value ?: return
+        if (before == null || before == now || now.isEmpty()) return
+        played.value = null
+        val i = now.indexOf(key).takeIf { it >= 0 } ?: before.indexOf(key).coerceIn(0, now.lastIndex)
+        state.scrollToItem(i)
+        withFrameNanos { }
+        runCatching { requesters[now[i]]?.requestFocus() }
+    }
+}
+
+@Composable
+fun rememberPlayedFrom(): PlayedFrom {
+    val played = rememberSaveable { mutableStateOf<String?>(null) }
+    return remember { PlayedFrom(played) }
 }
 
 // --- Scrolling ---
@@ -404,6 +441,17 @@ private fun Progress(progress: Float, modifier: Modifier) {
     }
 }
 
+/** A show's unwatched episodes, in the corner where a watched one has its check. */
+@Composable
+private fun CountBadge(count: Int, modifier: Modifier) {
+    Box(
+        modifier.height(17.dp).widthIn(min = 17.dp).background(Color.White.copy(alpha = 0.92f), CircleShape).padding(horizontal = 5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(count.toString(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Palette.Light.ink)
+    }
+}
+
 @Composable
 private fun WatchedBadge(modifier: Modifier) {
     Box(modifier.size(17.dp).background(Color.White.copy(alpha = 0.92f), CircleShape), contentAlignment = Alignment.Center) {
@@ -433,6 +481,7 @@ private fun ArtCard(
     modifier: Modifier,
     cornerIcon: ImageVector? = null,
     backdrop: String? = null,
+    unwatched: Int = 0,
 ) {
     val backdropState = LocalBackdrop.current
     LaunchedEffect(focused) {
@@ -461,6 +510,7 @@ private fun ArtCard(
         Artwork(url, fallback)
         if (progress > 0f) Progress(progress, Modifier.align(Alignment.BottomCenter).padding(horizontal = 10.dp, vertical = 9.dp).fillMaxWidth())
         if (watched) WatchedBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
+        else if (unwatched > 0) CountBadge(unwatched, Modifier.align(Alignment.TopEnd).padding(7.dp))
         if (cornerIcon != null) {
             Icon(
                 cornerIcon, contentDescription = null, tint = Color.White,
@@ -494,13 +544,15 @@ fun PosterCard(
     badge: String? = null,
     cornerIcon: ImageVector? = null,
     backdrop: String? = null,
+    /** A show's unwatched episodes, counted in the corner. */
+    unwatched: Int = 0,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val lift = animateLift(focused)
     var cardHeight by remember { mutableIntStateOf(0) }
     Column(Modifier.zIndex(if (focused) 1f else 0f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ArtCard(imageUrl, title, 2f / 3f, progress, watched, badge, onClick, onLongClick, interaction, focused, lift, { cardHeight = it }, modifier, cornerIcon, backdrop)
+        ArtCard(imageUrl, title, 2f / 3f, progress, watched, badge, onClick, onLongClick, interaction, focused, lift, { cardHeight = it }, modifier, cornerIcon, backdrop, unwatched)
         // Two lines, so long titles can be read; always two, so the grid's rows line up.
         Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Ink, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.followCard(lift, cardHeight).padding(horizontal = 2.dp))
     }

@@ -100,6 +100,8 @@ object Icons {
     val Sunset = stroke("M3 18h18 M7 18a5 5 0 0 1 10 0 M12 7v3 M5.6 11.6l1.4 1.4 M18.4 11.6 17 13 M9 21h6")
     val Disk = stroke("M4 6a8 3 0 1 0 16 0a8 3 0 1 0-16 0 M4 6v12a8 3 0 0 0 16 0V6 M4 12a8 3 0 0 0 16 0")
     val Account = stroke("M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 21a8 8 0 0 1 16 0")
+    val Info = stroke("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 11v5.5 M12 7.5h.01", width = 1.8f)
+    val Eye = stroke("M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z")
     val Smile = stroke("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M8.5 14a4 4 0 0 0 7 0 M9 9.5h.01 M15 9.5h.01", width = 2f)
     val Previous = fill("M5 5h2.6v14H5z M19.5 5v14L8.5 12z")
     val Next = fill("M16.4 5H19v14h-2.6z M4.5 5v14l11-7z")

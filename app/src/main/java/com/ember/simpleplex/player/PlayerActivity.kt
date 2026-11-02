@@ -39,6 +39,7 @@ import com.ember.simpleplex.plex.PlexClient
 import com.ember.simpleplex.plex.PlexServer
 import com.ember.simpleplex.plex.Stream
 import com.ember.simpleplex.ui.AppTheme
+import com.ember.simpleplex.ui.ViewPrefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelChildren
@@ -83,6 +84,7 @@ class PlayerActivity : ComponentActivity() {
     /** Where the current stream starts within the file; non-zero only for Plex's audio-converted stream. */
     private var timeBase = 0L
     private var converted = false
+    private var showDetails = false
     private var tracksApplied = false
     private var triedConversion = false
     /** Direct play failed once for this video and was restarted. */
@@ -117,6 +119,7 @@ class PlayerActivity : ComponentActivity() {
         client = PlexClient.get(this)
         plex = requireNotNull(client.home)
         showLanguages = ShowLanguages(this)
+        showDetails = ViewPrefs(this).playbackDetails
         // What the TV accepts as a bitstream on its current output (here: eARC to the receiver).
         caps = AudioCapabilities.getCapabilities(this, AudioAttributes.DEFAULT, null)
         queue += intent.getStringArrayListExtra(EXTRA_KEYS).orEmpty()
@@ -190,6 +193,7 @@ class PlayerActivity : ComponentActivity() {
                     onAnswer = { useCompat -> answer?.invoke(useCompat) },
                     preparing = preparing.value,
                     chapterImage = { plex.image(it, 336, 189) },
+                    showDetails = showDetails,
                 )
             }
         }

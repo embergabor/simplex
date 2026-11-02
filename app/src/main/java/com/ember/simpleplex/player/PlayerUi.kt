@@ -130,8 +130,11 @@ fun PlayerScreen(
     preparing: Boolean,
     /** A chapter's thumbnail path as an image address. */
     chapterImage: (String?) -> String?,
+    /** The format readout with the controls (Settings); the remote's Info button switches it for this video. */
+    showDetails: Boolean,
 ) {
     var visible by remember { mutableStateOf(true) }
+    var details by remember(item) { mutableStateOf(showDetails) }
     // Down from the play controls opens the file's chapters under them; closed with the controls.
     var chaptersOpen by remember(item) { mutableStateOf(false) }
     LaunchedEffect(visible) { if (!visible) chaptersOpen = false }
@@ -196,6 +199,22 @@ fun PlayerScreen(
         lastStepAt = e.eventTime
         scrubAt = (from + direction * step).coerceIn(0, duration)
     }
+    // Left/right with the controls hidden jump 10 s at once, shown in a bubble; holding them scrubs.
+    var jumped by remember { mutableLongStateOf(0L) } // ms jumped by the presses in a row, + or -
+    var jumpTo by remember { mutableLongStateOf(0L) }
+    var jumpedAt by remember { mutableLongStateOf(0L) }
+    fun jump(direction: Int) {
+        val from = if (jumped != 0L) jumpTo else position()
+        jumpTo = (from + direction * JUMP).coerceIn(0, duration)
+        jumped += jumpTo - from
+        jumpedAt = System.nanoTime()
+        seekTo(jumpTo)
+    }
+    LaunchedEffect(jumpedAt) {
+        delay(1500)
+        jumped = 0L
+    }
+
     fun commitScrub() {
         scrubAt?.let(seekTo)
         scrubAt = null
@@ -282,19 +301,28 @@ fun PlayerScreen(
                     Key.MediaRewind -> { scrub(e.nativeKeyEvent, -1); visible = true; true }
                     Key.MediaNext -> { onNext?.invoke(); true }
                     Key.MediaPrevious -> { onPrevious?.invoke(); true }
+                    Key.Info -> {
+                        if (visible && details) details = false else { details = true; visible = true }
+                        true
+                    }
                     else -> if (visible) false else {
                         // Hidden controls: OK presses a skip button that's showing.
                         if (e.key in okKeys && markerAction != null && e.nativeKeyEvent.repeatCount == 0) {
                             markerAction()
                             return@onPreviewKeyEvent true
                         }
-                        // Left/right start scrubbing, anything else (OK too) just shows the controls.
-                        when (e.key) {
-                            Key.DirectionLeft -> scrub(e.nativeKeyEvent, -1)
-                            Key.DirectionRight -> scrub(e.nativeKeyEvent, 1)
-                            else -> {}
+                        // Left/right jump; held, they scrub with the controls. Anything else (OK too) shows them.
+                        val direction = when (e.key) {
+                            Key.DirectionLeft -> -1
+                            Key.DirectionRight -> 1
+                            else -> 0
                         }
-                        visible = true
+                        if (direction != 0 && e.nativeKeyEvent.repeatCount == 0) {
+                            jump(direction)
+                        } else {
+                            if (direction != 0) { jumped = 0L; scrub(e.nativeKeyEvent, direction) }
+                            visible = true
+                        }
                         true
                     }
                 }
@@ -354,6 +382,9 @@ fun PlayerScreen(
             }
         }
         if (spinner) Spinner(Modifier.align(Alignment.Center))
+        if (error == null && !visible && jumped != 0L) {
+            JumpBubble(jumped, jumpTo, duration, Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp))
+        }
         if (error == null && !visible && markerAction != null) {
             SkipButton(
                 if (marker?.isIntro == true) "Skip intro" else "Next episode",
@@ -361,7 +392,7 @@ fun PlayerScreen(
             )
         }
         if (error == null && visible && item != null) {
-            InfoBox(info, trackBox, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
+            if (details || trackBox != null) InfoBox(info, trackBox, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
             Controls(
                 item, duration, audio, subtitle, isPlaying, position, scrubAt, previews, scrub,
                 onPrevious, onNext, onTogglePlay = { player.togglePlay() },
@@ -586,6 +617,25 @@ private fun SkipButton(label: String, modifier: Modifier) {
         Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
         Text("OK", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.7f),
             modifier = Modifier.border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp))
+    }
+}
+
+/** How far left/right jump with the controls hidden, either way. */
+private const val JUMP = 10_000L
+
+/** "+30 s · 1:02:15 / 1:45:00": the jump so far, and where it landed. */
+@Composable
+private fun JumpBubble(jumped: Long, at: Long, duration: Long, modifier: Modifier) {
+    val seconds = jumped / 1000
+    Row(
+        modifier
+            .background(Color(0xCC1C1C1E), RoundedCornerShape(50))
+            .padding(horizontal = 18.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text((if (seconds > 0) "+" else "−") + "${kotlin.math.abs(seconds)} s", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+        Text("${formatDuration(at)} / ${formatDuration(duration)}", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
     }
 }
 

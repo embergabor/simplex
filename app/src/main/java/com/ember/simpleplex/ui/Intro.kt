@@ -13,7 +13,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -27,7 +26,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
 
-/** Set by MainActivity on any key: the opening stops at once. */
+/** Set by MainActivity on any key, and once the opening has played: it plays once per start of the app. */
 var introSkipped by mutableStateOf(false)
 
 /**
@@ -37,12 +36,11 @@ var introSkipped by mutableStateOf(false)
  */
 @Composable
 fun Intro() {
-    var done by rememberSaveable { mutableStateOf(false) }
-    if (done || introSkipped) return
+    if (introSkipped) return
     val time = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         time.animateTo(1190f, tween(1190, easing = LinearEasing))
-        done = true
+        introSkipped = true
     }
     val ink = Palette.Ink
     val ground = Palette.Ground

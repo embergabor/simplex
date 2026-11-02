@@ -46,9 +46,15 @@ data class Item(
 ) {
     val isEpisode get() = type == "episode"
 
+    /** An episode not started yet, whose picture Settings may blur. */
+    val unseen get() = isEpisode && viewCount == 0 && viewOffset == 0L
+
     val watched
         get() = if (type == "show") leafCount > 0 && viewedLeafCount >= leafCount
         else viewCount > 0 && viewOffset == 0L
+
+    /** A show's episodes not watched yet; 0 for anything else. */
+    val unwatchedEpisodes get() = if (type == "show") (leafCount - viewedLeafCount).coerceAtLeast(0) else 0
 
     val progress
         get() = if (duration > 0 && viewOffset > 0) (viewOffset.toFloat() / duration).coerceIn(0f, 1f) else 0f

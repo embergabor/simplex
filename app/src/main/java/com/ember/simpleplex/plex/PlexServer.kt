@@ -139,8 +139,9 @@ class PlexServer(uri: String, val token: String, val machineId: String?, private
 
     // --- URLs ---
 
-    fun image(path: String?, width: Int, height: Int): String? = path?.let {
-        "$uri/photo/:/transcode?width=$width&height=$height&minSize=1&upscale=1&url=${enc(it)}&X-Plex-Token=$token"
+    /** [blur]: Plex blurs it (Android only blurs from version 12). */
+    fun image(path: String?, width: Int, height: Int, blur: Boolean = false): String? = path?.let {
+        "$uri/photo/:/transcode?width=$width&height=$height&minSize=1&upscale=1${if (blur) "&blur=20" else ""}&url=${enc(it)}&X-Plex-Token=$token"
     }
 
     fun fileUrl(key: String) = "$uri$key${if ('?' in key) '&' else '?'}X-Plex-Token=$token"

@@ -3,10 +3,12 @@ package com.ember.simpleplex
 import android.content.Intent
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.speech.RecognizerIntent
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -58,6 +61,7 @@ import com.ember.simpleplex.ui.VerseGridScreen
 import com.ember.simpleplex.ui.VerseVideosScreen
 import com.ember.simpleplex.ui.Message
 import com.ember.simpleplex.ui.VerseStore
+import com.ember.simpleplex.ui.VoiceSearch
 import com.ember.simpleplex.ui.SignInScreen
 
 private val TOP = setOf(Screen.Home, Screen.PlexVerse, Screen.Kids)
@@ -91,7 +95,28 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** The remote's mic: Google's voice input, its words then searched for in Search. */
+    private val voice = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val heard = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (result.resultCode == RESULT_OK && !heard.isNullOrBlank()) VoiceSearch.heard = heard
+    }
+
+    private fun listen(): Boolean {
+        if (!PlexClient.get(this).isSignedIn) return false
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Search")
+        return runCatching { voice.launch(intent) }.isSuccess
+    }
+
+    // The mic arrives as the search key on most remotes; Android asks for a search with it.
+    override fun onSearchRequested() = listen()
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_VOICE_ASSIST || event.keyCode == KeyEvent.KEYCODE_SEARCH) {
+            if (event.action == KeyEvent.ACTION_UP && listen()) return true
+            if (event.action == KeyEvent.ACTION_DOWN) return true
+        }
         RemoteKeys.repeating = event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0
         if (event.action == KeyEvent.ACTION_DOWN) introSkipped = true
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
@@ -121,6 +146,10 @@ class MainActivity : ComponentActivity() {
 
         val home = requireNotNull(plex.home)
         val stack = remember { mutableStateListOf<Screen>(Screen.Home) }
+        // Words from the mic open Search, which takes them as its query.
+        LaunchedEffect(VoiceSearch.heard) {
+            if (VoiceSearch.heard != null && stack.last() != Screen.Search) stack.add(Screen.Search)
+        }
         val states = rememberSaveableStateHolder()
         val nav = remember {
             object : Nav {

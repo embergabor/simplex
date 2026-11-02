@@ -46,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -187,6 +188,10 @@ private fun ContinueRow(plex: PlexClient, store: VerseStore, kids: Boolean, nav:
     // A title just watched comes in first; the row would otherwise stay scrolled on the old first card.
     val rowState = rememberLazyListState()
     LaunchedEffect(row.firstOrNull()?.sources?.first()?.ref) { rowState.scrollToItem(0) }
+    // Back from the player, focus returns to the card the video started from (see PlayedFrom).
+    val playedFrom = rememberPlayedFrom()
+    val keys = listOfNotNull("leading".takeIf { leading != null }) + row.map { it.sources.first().ref }
+    LaunchedEffect(keys) { playedFrom.follow(rowState, keys) }
     if (row.isEmpty() && leading == null) return
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (row.isNotEmpty()) SectionTitle("Continue watching", Modifier.padding(horizontal = 48.dp))
@@ -207,10 +212,12 @@ private fun ContinueRow(plex: PlexClient, store: VerseStore, kids: Boolean, nav:
                         subtitle = if (item.isEpisode) "${item.episodeLabel} · ${item.title}" else if (item.viewOffset > 0) timeLeft(item) else null,
                         progress = item.progress,
                         watched = false,
-                        onClick = { nav.play(listOf(c.sources.joinToString(",") { it.ref }), resume = true) },
+                        onClick = { playedFrom.played(c.sources.first().ref); nav.play(listOf(c.sources.joinToString(",") { it.ref }), resume = true) },
                         onLongClick = if (kids) null else ({ menuFor = c }),
                         width = 200.dp,
-                        modifier = Modifier.remembersFocus(memory, "c" + c.sources.first().ref, default = leading == null && c == row.first()),
+                        modifier = Modifier
+                            .focusRequester(playedFrom.requester(c.sources.first().ref))
+                            .remembersFocus(memory, "c" + c.sources.first().ref, default = leading == null && c == row.first()),
                     )
                 }
             }
@@ -374,6 +381,7 @@ fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
                 backdrop = entry.sources.firstOrNull { it.machineId in connected }?.let { connected[it.machineId]?.image(it.item.art ?: it.item.thumb, 640, 360) },
                     progress = entry.item.progress,
                     watched = entry.item.watched,
+                    unwatched = entry.item.unwatchedEpisodes,
                     badge = if (entry.sources.size > 1) "×${entry.sources.size}" else null,
                     cornerIcon = if (kids && entry.item.type == "show") Icons.Tv else null,
                     onClick = {

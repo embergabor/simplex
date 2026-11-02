@@ -27,6 +27,15 @@ Screens:
 - Info popup lists every audio track (one per line) and every subtitle language, no "+ N more".
 - Video the TV can't decode (VC-1 on the Sony) goes to Plex's conversion instead of a black picture.
 - The readout says what the TV is handed: "passthrough as DTS", "as E-AC3", …
+- Left/right with the player's controls hidden jump 10 s either way at once, with a bubble ("+30 s ·
+  1:02:15 / 1:45:00"); held, they scrub as before.
+- The format readout is hidden unless Settings → Playback details shows it; the remote's Info button switches it.
+- Settings → Unwatched episodes: blurs the pictures of episodes not started (show page, search). Plex blurs them.
+- Show posters count their unwatched episodes in the corner.
+- The opening plays once per start of the app, not on every return to it.
+- The remote's mic opens Google's voice input; the words are searched for in Search.
+- Back from the player, Continue watching gives focus back to the card the video started from (or the one in
+  its place once finished).
 
 ## What the Sony gives apps (checked 2026-11-02)
 
