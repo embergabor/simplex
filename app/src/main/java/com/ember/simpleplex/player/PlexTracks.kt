@@ -1,6 +1,7 @@
 package com.ember.simpleplex.player
 
 import androidx.media3.common.C
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
@@ -148,5 +149,27 @@ object PlexTracks {
         if (audio.isEmpty()) return false
         val selected = audio.firstOrNull { it.isSelected }
         return if (selected != null) !selected.isTrackSupported(0) else audio.none { it.isSupported }
+    }
+
+    /** True when the file has video and the TV has no decoder for it (VC-1 on the Sony): sound, black picture. */
+    fun videoUnplayable(tracks: Tracks): Boolean {
+        val video = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+        return video.isNotEmpty() && video.none { it.isSupported }
+    }
+
+    /** Plex's names for the video codecs it may copy into a converted stream, beside H.264, and their decoders. */
+    private val VIDEO_CODECS = listOf(
+        "hevc" to MimeTypes.VIDEO_H265,
+        "mpeg2video" to MimeTypes.VIDEO_MPEG2,
+        "vc1" to MimeTypes.VIDEO_VC1,
+        "vp9" to MimeTypes.VIDEO_VP9,
+        "av1" to MimeTypes.VIDEO_AV1,
+    )
+
+    /** Of [VIDEO_CODECS], the ones this TV decodes. */
+    val decodableVideoCodecs: List<String> by lazy {
+        VIDEO_CODECS.filter { (_, mime) ->
+            runCatching { MediaCodecUtil.getDecoderInfos(mime, false, false).isNotEmpty() }.getOrDefault(false)
+        }.map { it.first }
     }
 }

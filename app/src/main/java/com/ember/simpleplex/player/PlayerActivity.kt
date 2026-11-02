@@ -468,6 +468,10 @@ class PlayerActivity : ComponentActivity() {
         override fun onTracksChanged(tracks: Tracks) {
             val part = current.value?.part ?: return
             if (tracks.isEmpty) return
+            // No decoder for the video (VC-1 on this TV) plays the sound over a black picture: Plex converts it.
+            if (!triedConversion && !converted && PlexTracks.videoUnplayable(tracks)) {
+                return playConverted(positionMs())
+            }
             if (!tracksApplied) {
                 tracksApplied = true
                 PlexTracks.apply(player, part, audio.value, subtitle.value, onlyChosen = converted)
@@ -526,12 +530,12 @@ class PlayerActivity : ComponentActivity() {
             player.pause()
             preparing.value = true
             val stream = try {
-                plex.convertedStream(item.ratingKey, offset, keepSubtitle = subtitle.value != null)
+                plex.convertedStream(item.ratingKey, offset, keepSubtitle = subtitle.value != null, PlexTracks.decodableVideoCodecs)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 player.stop()
-                error.value = "This file's audio can't be played on this TV, and Plex couldn't convert it.\n${e.message}"
+                error.value = "This file can't be played on this TV as it is, and Plex couldn't convert it.\n${e.message}"
                 return@launch
             } finally {
                 preparing.value = false

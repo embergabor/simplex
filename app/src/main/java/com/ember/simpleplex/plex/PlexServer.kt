@@ -192,9 +192,11 @@ class PlexServer(uri: String, val token: String, val machineId: String?, private
      * Asks Plex for a stream with the audio converted (to 5.1 E-AC3 or AC3, for passthrough); Plex copies
      * the video when it can. With [keepSubtitle], the subtitle selected on the server comes along as its
      * own track (text or image) in a Matroska stream: Plex's HLS can't carry image subtitles, and only
-     * burns text ones in. Without it, an HLS stream with no subtitles.
+     * burns text ones in. Without it, an HLS stream with no subtitles. [videoCodecs]: the ones beyond H.264
+     * the TV decodes, so Plex copies only video that plays and converts the rest.
      */
-    suspend fun convertedStream(ratingKey: String, offsetMs: Long, keepSubtitle: Boolean): Converted {
+    suspend fun convertedStream(ratingKey: String, offsetMs: Long, keepSubtitle: Boolean, videoCodecs: List<String>): Converted {
+        val more = videoCodecs.joinToString(",")
         val session = UUID.randomUUID().toString()
         val platform = if (keepSubtitle) "Generic" else "Android"
         val limits = listOf(
@@ -205,13 +207,13 @@ class PlexServer(uri: String, val token: String, val machineId: String?, private
             // Plex's Android profile forces subtitles to be burned in; its generic one (asked for with the
             // "Generic" platform below) keeps them when the target container can hold them.
             val mkv = "type=videoProfile&context=streaming&protocol=http&container=mkv"
-            listOf("add-transcode-target($mkv&videoCodec=h264,hevc,mpeg2video,vc1,vp9,av1&audioCodec=eac3,ac3&subtitleCodec=pgs,vobsub,srt,ass)") + limits
+            listOf("add-transcode-target($mkv&videoCodec=${listOf("h264", more).filter { it.isNotEmpty() }.joinToString(",")}&audioCodec=eac3,ac3&subtitleCodec=pgs,vobsub,srt,ass)") + limits
         } else {
             // Plex starts from its built-in profile for the platform, whose HLS target only allows H.264 video
             // and stereo AAC audio. These extend that target instead of adding a second one (which Plex ignores).
             val hls = "type=videoProfile&context=streaming&protocol=hls"
-            listOf(
-                "append-transcode-target-codec($hls&videoCodec=hevc,mpeg2video,vc1,vp9,av1)",
+            listOfNotNull(
+                more.takeIf { it.isNotEmpty() }?.let { "append-transcode-target-codec($hls&videoCodec=$it)" },
                 "add-transcode-target-audio-codec($hls&audioCodec=eac3)",
                 "add-transcode-target-audio-codec($hls&audioCodec=ac3)",
             ) + limits
