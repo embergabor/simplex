@@ -32,7 +32,6 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.util.EventLogger
 import androidx.media3.exoplayer.audio.AudioCapabilities
-import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import com.ember.simpleplex.plex.Episodes
 import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Part
@@ -85,10 +84,6 @@ class PlayerActivity : ComponentActivity() {
     private var timeBase = 0L
     private var converted = false
     private var tracksApplied = false
-
-    /** Read on the playback thread, by [HardwareVideoRenderersFactory]'s audio sink. */
-    @Volatile
-    private var dtsHdIds = emptySet<String>()
     private var triedConversion = false
     /** Direct play failed once for this video and was restarted. */
     private var retried = false
@@ -131,7 +126,7 @@ class PlayerActivity : ComponentActivity() {
         index = intent.getIntExtra(EXTRA_START_AT, 0).coerceIn(0, (queue.size - 1).coerceAtLeast(0))
 
         // Platform renderers first (passthrough or the TV's decoders), FFmpeg after them for audio only.
-        val renderers = HardwareVideoRenderersFactory(this) { dtsHdIds }
+        val renderers = HardwareVideoRenderersFactory(this)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         player = ExoPlayer.Builder(this, renderers)
             .setSeekBackIncrementMs(10_000)
@@ -158,7 +153,6 @@ class PlayerActivity : ComponentActivity() {
 
             override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, config: AudioSink.AudioTrackConfig) {
                 audioOutput.value = AudioOutput(config.encoding, Describe.channelCount(config.channelConfig))
-                reopenAsDtsHd()
             }
         })
 
@@ -478,8 +472,6 @@ class PlayerActivity : ComponentActivity() {
             if (!triedConversion && !converted && PlexTracks.videoUnplayable(tracks)) {
                 return playConverted(positionMs())
             }
-            dtsHdIds = if (converted) emptySet() else PlexTracks.dtsHdIds(tracks, part)
-            reopenAsDtsHd()
             if (!tracksApplied) {
                 tracksApplied = true
                 PlexTracks.apply(player, part, audio.value, subtitle.value, onlyChosen = converted)
@@ -517,20 +509,6 @@ class PlayerActivity : ComponentActivity() {
                 else -> playConverted(positionMs())
             }
         }
-    }
-
-    /**
-     * The audio can open before the tracks reach [dtsHdIds]: a DTS-HD track then went out as its DTS
-     * core. Switching the audio off and on again opens it once more, as DTS-HD.
-     */
-    private fun reopenAsDtsHd() {
-        if (audioOutput.value?.encoding != C.ENCODING_DTS) return
-        val selected = player.currentTracks.groups.firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected } ?: return
-        if (selected.getTrackFormat(0).id !in dtsHdIds) return
-        audioOutput.value = null
-        val params = player.trackSelectionParameters
-        player.trackSelectionParameters = params.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true).build()
-        player.trackSelectionParameters = params
     }
 
     private fun isAudioError(e: PlaybackException): Boolean {
@@ -648,26 +626,9 @@ class PlayerActivity : ComponentActivity() {
 
     /**
      * Video only ever goes through the TV's hardware decoder: it's what deinterlaces and handles HDR,
-     * and a software fallback (FFmpeg or Android's own) can't keep up with 4K anyway. Audio tracks in
-     * [dtsHdIds] are passed through as DTS-HD rather than their DTS core (see [PlexTracks.dtsHdIds]).
+     * and a software fallback (FFmpeg or Android's own) can't keep up with 4K anyway.
      */
-    private class HardwareVideoRenderersFactory(
-        context: Context,
-        private val dtsHdIds: () -> Set<String>,
-    ) : DefaultRenderersFactory(context) {
-        override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink =
-            object : ForwardingAudioSink(requireNotNull(super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams))) {
-                private fun hd(format: Format) =
-                    if (format.sampleMimeType == MimeTypes.AUDIO_DTS && format.id in dtsHdIds()) {
-                        format.buildUpon().setSampleMimeType(MimeTypes.AUDIO_DTS_HD).build()
-                    } else format
-
-                override fun supportsFormat(format: Format) = super.supportsFormat(hd(format))
-                override fun getFormatSupport(format: Format) = super.getFormatSupport(hd(format))
-                override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) =
-                    super.configure(hd(inputFormat), specifiedBufferSize, outputChannels)
-            }
-
+    private class HardwareVideoRenderersFactory(context: Context) : DefaultRenderersFactory(context) {
         override fun buildVideoRenderers(
             context: Context,
             extensionRendererMode: Int,
