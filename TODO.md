@@ -25,6 +25,16 @@ Screens:
 - Settings → Wake server: the server's MAC address typed in (separators optional), with "Wake now". With
   one saved, the "couldn't reach" screens get a focused "Wake server" button. Not tried on a sleeping server.
 - Info popup lists every audio track (one per line) and every subtitle language, no "+ N more".
+- Video the TV can't decode (VC-1 on the Sony) goes to Plex's conversion instead of a black picture.
+- DTS-HD tracks are handed over as DTS-HD (Matroska labels them plain DTS); the readout says
+  "passthrough as …". Tried 2026-11-02: the Sony takes DTS-HD but sends the receiver only the DTS core.
+
+## What the Sony gives apps (checked 2026-11-02)
+
+The TV's own apps reach the Marantz through the TV's audio system, not straight over eARC:
+- Bitstream: AC3, E-AC3 (Atmos too) and DTS. DTS-HD is announced and accepted, but only its core comes out.
+- No TrueHD or Dolby MAT, and PCM in stereo only: decoded audio is always 2.0.
+- No VC-1 video decoder (only MediaTek's WMV one, which ExoPlayer doesn't use for VC-1).
 
 Updates:
 - Release key in `~/.simplex-release` (back it up: without it no release can update the TV). Versions are
