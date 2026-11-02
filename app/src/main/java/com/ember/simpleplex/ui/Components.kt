@@ -412,8 +412,7 @@ private fun WatchedBadge(modifier: Modifier) {
 }
 
 /**
- * A poster or thumbnail. Focused, it lifts: it grows, casts a soft shadow, tilts a little towards the
- * key that brought focus and springs back flat, and a faint shine sweeps across it once. All of it is
+ * A poster or thumbnail. Focused, it lifts: it grows and casts a soft shadow. All of it is
  * drawn inside the focus target, so the box the lists scroll into view stays put. [backdrop] is shown
  * behind the screen while it has focus (see [WithBackdrop]).
  */
@@ -435,23 +434,10 @@ private fun ArtCard(
     cornerIcon: ImageVector? = null,
     backdrop: String? = null,
 ) {
-    val tiltX = remember { Animatable(0f) }
-    val tiltY = remember { Animatable(0f) }
-    val shine = remember { Animatable(1f) }
     val backdropState = LocalBackdrop.current
     LaunchedEffect(focused) {
-        if (!focused) return@LaunchedEffect
-        if (backdrop != null) backdropState?.value = backdrop
-        // Leans away from the way focus came in (right: the right edge dips back), then settles flat.
-        tiltY.snapTo(RemoteKeys.dx * TILT)
-        tiltX.snapTo(-RemoteKeys.dy * TILT)
-        val back = spring<Float>(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow)
-        launch { tiltX.animateTo(0f, back) }
-        launch { tiltY.animateTo(0f, back) }
-        shine.snapTo(0f)
-        shine.animateTo(1f, tween(700))
+        if (focused && backdrop != null) backdropState?.value = backdrop
     }
-    val density = LocalDensity.current.density
     Box(
         modifier.fillMaxWidth().aspectRatio(aspect).onSizeChanged { onHeight(it.height) }
             .okClick(onClick, onLongClick)
@@ -464,29 +450,12 @@ private fun ArtCard(
                 val s = 1f + (FOCUSED_SCALE - 1f) * lift.value
                 scaleX = s
                 scaleY = s
-                rotationX = tiltX.value
-                rotationY = tiltY.value
-                cameraDistance = 12f * density
                 shadowElevation = 18.dp.toPx() * lift.value.coerceIn(0f, 1f)
                 // A light glow in dark mode, where a shadow vanishes (Android 9+; older TVs keep the shadow).
                 ambientShadowColor = Palette.Shadow
                 spotShadowColor = Palette.Shadow
                 shape = cardShape
                 clip = true
-            }
-            .drawWithContent {
-                drawContent()
-                val p = shine.value
-                if (focused && p < 1f) {
-                    // A diagonal band of light from the top left to the bottom right.
-                    val x = size.width * (3f * p - 1f)
-                    drawRect(
-                        Brush.linearGradient(
-                            0f to Color.Transparent, 0.5f to Color.White.copy(alpha = 0.15f), 1f to Color.Transparent,
-                            start = Offset(x - size.width * 0.35f, 0f), end = Offset(x + size.width * 0.35f, size.height),
-                        )
-                    )
-                }
             },
     ) {
         Artwork(url, fallback)
@@ -511,9 +480,6 @@ private fun ArtCard(
         }
     }
 }
-
-/** Degrees the focused card leans when it gets focus. */
-private const val TILT = 4f
 
 /** 2:3 poster with the title underneath (movies, shows). */
 @Composable
@@ -584,18 +550,22 @@ val LocalBackdrop = staticCompositionLocalOf<MutableState<String?>?> { null }
  * scrolling past items doesn't load an image for each of them. Ask for a small image: blurred and
  * scaled up, nobody sees the difference.
  */
+private var lastBackdrop: ImageBitmap? = null
+
 @Composable
 fun WithBackdrop(content: @Composable () -> Unit) {
     // Saved with the screen, so coming back to it brings its backdrop back too.
     val focused = rememberSaveable { mutableStateOf<String?>(null) }
-    var image by remember { mutableStateOf<ImageBitmap?>(null) }
+    // Starts on the last screen's picture, so a new screen never opens on the bare ground.
+    var image by remember { mutableStateOf(lastBackdrop) }
     val context = LocalContext.current
     LaunchedEffect(Unit) {
         val loader = SingletonImageLoader.get(context)
         snapshotFlow { focused.value }.filterNotNull().collectLatest { url ->
-            delay(300)
+            // The first picture comes at once; later ones wait for focus to rest.
+            if (image != null) delay(300)
             val result = loader.execute(ImageRequest.Builder(context).data(url).build())
-            (result as? SuccessResult)?.let { image = it.image.toBitmap().asImageBitmap() }
+            (result as? SuccessResult)?.let { image = it.image.toBitmap().asImageBitmap().also { b -> lastBackdrop = b } }
         }
     }
     Box(Modifier.fillMaxSize()) {

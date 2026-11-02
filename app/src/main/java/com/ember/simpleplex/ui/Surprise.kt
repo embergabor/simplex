@@ -2,6 +2,14 @@
 
 package com.ember.simpleplex.ui
 
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.Matrix
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -69,29 +77,56 @@ import com.ember.simpleplex.plex.PlexServer
 /** Dark brown on the Kids orange, as on the Kids button. */
 private val OnKids = Color(0xFF2A1A00)
 
-/** Kids' big button: OK spins the reel and Simplex picks something to watch. */
+/** Kids' Surprise me! card, the size of a Continue watching card: OK spins the reel and Simplex picks something. */
 @Composable
 fun SurpriseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.size(285.dp, 90.dp),
-        contentPadding = PaddingValues(horizontal = 22.dp),
-        shape = ButtonDefaults.shape(RoundedCornerShape(22.dp)),
-        scale = ButtonDefaults.scale(focusedScale = 1.06f),
-        glow = ButtonDefaults.glow(focusedGlow = Glow(Color(0xFFFF8C00).copy(alpha = 0.35f), 18.dp)),
-        colors = ButtonDefaults.colors(
-            containerColor = Palette.Kids, contentColor = OnKids,
-            focusedContainerColor = Palette.Kids, focusedContentColor = OnKids,
-        ),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Icon(Icons.Dice, contentDescription = null, modifier = Modifier.size(48.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Surprise me!", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-                Text("Simplex picks something", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = OnKids.copy(alpha = 0.75f))
-            }
+    Column(Modifier.width(200.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Button(
+            onClick = onClick,
+            modifier = modifier.fillMaxWidth().aspectRatio(16f / 9f).semantics { contentDescription = "Surprise me" },
+            contentPadding = PaddingValues(0.dp),
+            shape = ButtonDefaults.shape(RoundedCornerShape(8.dp)),
+            scale = ButtonDefaults.scale(focusedScale = 1.1f),
+            glow = ButtonDefaults.glow(focusedGlow = Glow(Color(0xFFFF8C00).copy(alpha = 0.35f), 18.dp)),
+            colors = ButtonDefaults.colors(
+                containerColor = Palette.Kids, contentColor = OnKids,
+                focusedContainerColor = Palette.Kids, focusedContentColor = OnKids,
+            ),
+        ) {
+            Canvas(Modifier.fillMaxSize()) { drawDie() }
         }
+        // As big as the two lines under the other cards.
+        Text("Surprise me!", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Palette.Ink, maxLines = 1, modifier = Modifier.padding(horizontal = 2.dp))
     }
+}
+
+/**
+ * A die in 3D, seen from above a corner: one on top, two on the left, three on the right. Each face is
+ * drawn as a unit square mapped onto its side of the cube, so the pips foreshorten with it.
+ */
+private fun DrawScope.drawDie() {
+    val s = size.minDimension * 0.36f
+    val c = center
+    val dx = s * 0.866f
+    val top = Offset(c.x, c.y - s)
+    val left = Offset(c.x - dx, c.y - s / 2)
+    val right = Offset(c.x + dx, c.y - s / 2)
+    val leftLow = Offset(c.x - dx, c.y + s / 2)
+    val bottom = Offset(c.x, c.y + s)
+    // The outline shows between the faces as seams.
+    drawPath(Path().apply {
+        moveTo(top.x, top.y); lineTo(right.x, right.y); lineTo(right.x, c.y + s / 2)
+        lineTo(bottom.x, bottom.y); lineTo(leftLow.x, leftLow.y); lineTo(left.x, left.y); close()
+    }, OnKids.copy(alpha = 0.85f))
+    fun face(origin: Offset, u: Offset, v: Offset, color: Color, pips: List<Offset>) = withTransform({
+        transform(Matrix(floatArrayOf(u.x, u.y, 0f, 0f, v.x, v.y, 0f, 0f, 0f, 0f, 1f, 0f, origin.x, origin.y, 0f, 1f)))
+    }) {
+        drawRoundRect(color, Offset(0.05f, 0.05f), Size(0.9f, 0.9f), CornerRadius(0.16f))
+        pips.forEach { drawCircle(OnKids, 0.1f, it) }
+    }
+    face(left, top - left, c - left, Color.White, listOf(Offset(0.5f, 0.5f)))
+    face(left, c - left, leftLow - left, Color(0xFFF1E4D4), listOf(Offset(0.28f, 0.28f), Offset(0.72f, 0.72f)))
+    face(c, right - c, bottom - c, Color(0xFFD8C2A8), listOf(Offset(0.25f, 0.25f), Offset(0.5f, 0.5f), Offset(0.75f, 0.75f)))
 }
 
 private const val REEL = 16
@@ -102,7 +137,7 @@ private val GAP = 22.dp
 
 /**
  * The surprise: a reel of posters spins and slows down on a random pick, then Play counts down for
- * two seconds and starts it, unless focus moved to Spin again. A series plays a random episode.
+ * four and a half seconds and starts it, unless focus moved to Spin again. A series plays a random episode.
  */
 @Composable
 fun Surprise(entries: List<VerseEntry>, connected: Map<String, PlexServer>, nav: Nav, onDismiss: () -> Unit) {
@@ -200,7 +235,7 @@ fun Surprise(entries: List<VerseEntry>, connected: Map<String, PlexServer>, nav:
                         }
                         LaunchedEffect(landed, canPlay, counting) {
                             if (!landed || !canPlay || !counting) return@LaunchedEffect
-                            ring.animateTo(1f, tween(2100, easing = LinearEasing))
+                            ring.animateTo(1f, tween(4600, easing = LinearEasing))
                             play()
                         }
                         KidsButton(
