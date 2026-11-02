@@ -1,6 +1,7 @@
 package com.ember.simpleplex.player
 
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
@@ -149,9 +150,21 @@ object Describe {
         val out = when {
             output == null -> ""
             Util.isEncodingLinearPcm(output.encoding) -> " → decoded, PCM ${channels(output.channels)}"
-            else -> " → passthrough"
+            // Plex's conversion already names its format; the file's own audio says what the TV got.
+            delivery != Delivery.DIRECT -> " → passthrough"
+            else -> " → passthrough" + (passthroughName(output.encoding)?.let { " as $it" } ?: "")
         }
         return source + converted + out
+    }
+
+    /** What the TV is handed as a bitstream: shows whether DTS-HD went out whole or as its DTS core. */
+    private fun passthroughName(encoding: Int) = when (encoding) {
+        C.ENCODING_AC3 -> "AC3"
+        C.ENCODING_E_AC3, C.ENCODING_E_AC3_JOC -> "E-AC3"
+        C.ENCODING_DTS -> "DTS"
+        C.ENCODING_DTS_HD -> "DTS-HD"
+        C.ENCODING_DOLBY_TRUEHD -> "TrueHD"
+        else -> null
     }
 
     private fun scan(type: String?) = when (type?.lowercase()) {

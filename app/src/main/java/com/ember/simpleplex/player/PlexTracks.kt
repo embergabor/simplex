@@ -97,6 +97,20 @@ object PlexTracks {
     private fun Tracks.Group.hasId(id: String) =
         (0 until length).any { getTrackFormat(it).id?.contains(id) == true }
 
+    /**
+     * The player's ids of the file's DTS-HD tracks. Matroska labels DTS and DTS-HD alike, so the player
+     * would open every one as plain DTS and pass through only its core; Plex knows which are DTS-HD.
+     */
+    fun dtsHdIds(tracks: Tracks, part: Part): Set<String> {
+        val audioGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        val plexAudio = audioStreams(part).filter { !it.isExternal }.sortedBy { it.index ?: Int.MAX_VALUE }
+        if (plexAudio.size != audioGroups.size) return emptySet()
+        return audioGroups.zip(plexAudio)
+            .filter { (group, s) -> encoding(s) == C.ENCODING_DTS_HD && group.getTrackFormat(0).sampleMimeType == MimeTypes.AUDIO_DTS }
+            .mapNotNull { (group, _) -> group.getTrackFormat(0).id }
+            .toSet()
+    }
+
     /** Applies the choice; [subtitle] null means off (a forced track still shows). */
     fun apply(player: Player, part: Part, audio: Stream?, subtitle: Stream?, onlyChosen: Boolean = false) {
         val groups = player.currentTracks.groups

@@ -24,7 +24,8 @@ class DescribeTest {
 
     @Test fun audioPassthroughAndDecoded() {
         val dts = stream(2, "dca", profile = "ma", channels = 8)
-        assertEquals("DTS-HD MA 7.1 → passthrough", Describe.audio(dts, Delivery.DIRECT, null, AudioOutput(C.ENCODING_DTS_HD, 8)))
+        assertEquals("DTS-HD MA 7.1 → passthrough as DTS-HD", Describe.audio(dts, Delivery.DIRECT, null, AudioOutput(C.ENCODING_DTS_HD, 8)))
+        assertEquals("DTS-HD MA 7.1 → passthrough as DTS", Describe.audio(dts, Delivery.DIRECT, null, AudioOutput(C.ENCODING_DTS, 6)))
         val truehd = stream(2, "truehd", title = "English (TrueHD 7.1 Atmos)", channels = 8)
         assertEquals("TrueHD 7.1 Atmos → decoded, PCM Stereo", Describe.audio(truehd, Delivery.DIRECT, null, AudioOutput(C.ENCODING_PCM_16BIT, 2)))
     }
