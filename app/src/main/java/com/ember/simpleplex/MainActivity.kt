@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import com.ember.simpleplex.player.PlayerActivity
+import kotlinx.coroutines.delay
 import com.ember.simpleplex.plex.PlexClient
 import com.ember.simpleplex.plex.PlexServer
 import com.ember.simpleplex.ui.AppTheme
@@ -74,6 +75,9 @@ import com.ember.simpleplex.ui.Message
 import com.ember.simpleplex.ui.VerseStore
 import com.ember.simpleplex.ui.VoiceSearch
 import com.ember.simpleplex.ui.SignInScreen
+
+/** How long the leaving screen takes to fade out, in ms. */
+private const val LEAVE_MS = 120
 
 private val TOP = setOf(Screen.Home, Screen.PlexVerse, Screen.Kids)
 
@@ -212,14 +216,21 @@ class MainActivity : ComponentActivity() {
             val backdrop = remember { mutableStateOf<ImageBitmap?>(null) }
             if (transition.targetState == EnterExitState.Visible) SideEffect { Backdrops.shown = backdrop }
             DisposableEffect(backdrop) { onDispose { if (Backdrops.shown === backdrop) Backdrops.shown = null } }
-            // The new screen fades in once its first frame is drawn: building it can take a few frames' time,
-            // which would otherwise use up the fade. The leaving one fades out at once.
+            // Building a screen takes the TV 70-130 ms, a pause that broke up the fades. So the leaving screen
+            // fades out first, the new one is built once it has gone, while nothing moves, and fades in once
+            // its first frame is drawn. The first screen is built at once.
+            var built by remember { mutableStateOf(transition.currentState == EnterExitState.Visible) }
             val enter = remember { Animatable(0f) }
-            LaunchedEffect(Unit) {
+            LaunchedEffect(built) {
+                if (!built) {
+                    delay(LEAVE_MS.toLong())
+                    built = true
+                    return@LaunchedEffect
+                }
                 withFrameNanos { }
                 enter.animateTo(1f, tween(180))
             }
-            val leave by transition.animateFloat({ tween(120) }, label = "leave") { if (it == EnterExitState.PostExit) 0f else 1f }
+            val leave by transition.animateFloat({ tween(LEAVE_MS) }, label = "leave") { if (it == EnterExitState.PostExit) 0f else 1f }
             // ModulateAlpha fades each thing drawn instead of the screen as a picture: the TV's GPU can't
             // afford two full-screen offscreen layers a frame.
             val fadeAndSettle = Modifier.graphicsLayer {
@@ -233,7 +244,7 @@ class MainActivity : ComponentActivity() {
             // And by screen: during the fade, the screen leaving and the one coming can share a depth.
             Box(fadeAndSettle) {
                 CompositionLocalProvider(LocalScreenBackdrop provides backdrop) {
-                    states.SaveableStateProvider(stateKey(depth, s)) { ScreenContent(s, plex, home, nav) }
+                    if (built) states.SaveableStateProvider(stateKey(depth, s)) { ScreenContent(s, plex, home, nav) }
                 }
             }
         }

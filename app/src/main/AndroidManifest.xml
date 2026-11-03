@@ -16,6 +16,9 @@
         android:largeHeap="true"
         android:theme="@style/Theme.Simplex">
 
+        <!-- Lets simpleperf and Perfetto look inside the release build on the TV; nothing else changes. -->
+        <profileable android:shell="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
