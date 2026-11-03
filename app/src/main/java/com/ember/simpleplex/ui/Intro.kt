@@ -14,6 +14,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.Density
+import kotlin.math.min
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -30,47 +40,69 @@ import androidx.compose.ui.unit.dp
 var introSkipped by mutableStateOf(false)
 
 /**
+ * How much of the app the opening lets through: none until it opens up, all once it's over. Hidden
+ * rather than covered, so the TV doesn't draw the screen underneath for nothing.
+ */
+val introReveal get() = if (introSkipped) 1f else revealed.floatValue
+private val revealed = mutableFloatStateOf(0f)
+
+/**
  * The opening, about 1.2 s: the two play buttons of the x fly in and click together, "simple" slides
- * in beside them, then the camera dives through the gap of the x into Home. Drawn over the app, which
- * loads underneath and takes keys all along; never focusable.
+ * in beside them, then the camera dives through the gap of the x into Home. Drawn on the ground while
+ * the app loads unseen (see [introReveal]) and takes keys all along; never focusable.
  */
 @Composable
 fun Intro() {
     if (introSkipped) return
     val time = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        time.animateTo(1190f, tween(1190, easing = LinearEasing))
+        // A cold start's first frames are slow (the window's buffers, Home's first layout). Starting once
+        // frames come steadily keeps them from swallowing the first half of the opening.
+        val start = withFrameNanos { it }
+        var last = start
+        var steady = 0
+        while (steady < 3 && last - start < 1_500_000_000L) {
+            val now = withFrameNanos { it }
+            steady = if (now - last < 25_000_000L) steady + 1 else 0
+            last = now
+        }
+        time.animateTo(END, tween(END.toInt(), easing = LinearEasing)) { revealed.floatValue = span(value, 952f, END, LinearEasing) }
         introSkipped = true
     }
+    // Nothing in the picture moves once the dive starts: from then on it is kept as an offscreen layer
+    // that only grows and fades. Drawing the paths anew at up to 14 times their size each frame was more
+    // than the TV could do in a frame.
+    val drawn by remember { derivedStateOf { min(time.value, DIVE) } }
     val ink = Palette.Ink
-    val ground = Palette.Ground
-    Canvas(Modifier.fillMaxSize()) {
-        val t = time.value
-        fun span(from: Float, to: Float, easing: Easing = FastOutSlowInEasing) =
-            easing.transform(((t - from) / (to - from)).coerceIn(0f, 1f))
-
-        drawRect(ground, alpha = 1f - span(952f, 1190f, LinearEasing))
-
-        val u = 90.dp.toPx() / 100 // pixels per wordmark unit (1 em = 100)
-        val origin = Offset(center.x - Wordmark.WIDTH / 2 * u, center.y + 36.5f * u) // left end of the baseline
-        val gap = origin + Offset((Wordmark.X_AT + 20 * Wordmark.X_SCALE) * u, (Wordmark.X_TOP + 18 * Wordmark.X_SCALE) * u)
-        val zoom = 1f + 13f * span(850f, 1190f, CubicBezierEasing(0.55f, 0f, 0.8f, 0.2f))
-        val alpha = 1f - span(1054f, 1190f, LinearEasing)
-
-        scale(zoom, pivot = gap) {
+    Box(Modifier.fillMaxSize()) {
+        Canvas(
+            Modifier.fillMaxSize().graphicsLayer {
+                val t = time.value
+                val zoom = 1f + 13f * span(t, DIVE, END, CubicBezierEasing(0.55f, 0f, 0.8f, 0.2f))
+                val gap = gapOf(size, wordmarkUnit())
+                scaleX = zoom
+                scaleY = zoom
+                transformOrigin = TransformOrigin(gap.x / size.width, gap.y / size.height)
+                alpha = 1f - span(t, 1054f, END, LinearEasing)
+                compositingStrategy = if (t >= DIVE) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+            },
+        ) {
+            val t = drawn
+            val u = wordmarkUnit()
+            val origin = originOf(size, u)
             translate(origin.x, origin.y) {
                 scale(u, pivot = Offset.Zero) {
-                    val word = span(408f, 748f, LinearOutSlow)
+                    val word = span(t, 408f, 748f, LinearOutSlow)
                     translate(15f * (1f - word)) {
-                        drawPath(Wordmark.sim, ink, alpha * word)
-                        drawPath(Wordmark.ple, Palette.Plex, alpha * word)
+                        drawPath(Wordmark.sim, ink, word)
+                        drawPath(Wordmark.ple, Palette.Plex, word)
                     }
                     // The halves fly in from a third of the screen away, overshoot a little and click.
                     val far = size.width / 3 / u
-                    val apart = if (t < 408f) far * (1f - span(0f, 408f, Fly)) - 2.5f * span(0f, 408f, Fly)
-                    else -2.5f * (1f - span(408f, 510f, Fly))
-                    val click = 1f + 0.18f * if (t < 493f) span(408f, 493f, LinearOutSlow) else 1f - span(493f, 612f, LinearOutSlow)
-                    val shown = alpha * span(0f, 136f, LinearEasing)
+                    val apart = if (t < 408f) far * (1f - span(t, 0f, 408f, Fly)) - 2.5f * span(t, 0f, 408f, Fly)
+                    else -2.5f * (1f - span(t, 408f, 510f, Fly))
+                    val click = 1f + 0.18f * if (t < 493f) span(t, 408f, 493f, LinearOutSlow) else 1f - span(t, 493f, 612f, LinearOutSlow)
+                    val shown = span(t, 0f, 136f, LinearEasing)
                     translate(Wordmark.X_AT, Wordmark.X_TOP) {
                         scale(Wordmark.X_SCALE * click, pivot = Offset(20f, 18f)) {
                             drawHalf(Wordmark.left, Offset(-apart, 0f), Palette.Plex, shown)
@@ -82,6 +114,24 @@ fun Intro() {
         }
     }
 }
+
+/** Where the dive starts and the opening ends, in ms. */
+private const val DIVE = 850f
+private const val END = 1190f
+
+/** [easing] over [from] to [to] ms, at [t]. */
+private fun span(t: Float, from: Float, to: Float, easing: Easing = FastOutSlowInEasing) =
+    easing.transform(((t - from) / (to - from)).coerceIn(0f, 1f))
+
+/** Pixels per wordmark unit (1 em = 100). */
+private fun Density.wordmarkUnit() = 90.dp.toPx() / 100
+
+/** The left end of the wordmark's baseline, centred in [size]. */
+private fun originOf(size: Size, u: Float) = Offset(size.width / 2 - Wordmark.WIDTH / 2 * u, size.height / 2 + 36.5f * u)
+
+/** The gap of the x, which the dive goes through. */
+private fun gapOf(size: Size, u: Float) =
+    originOf(size, u) + Offset((Wordmark.X_AT + 20 * Wordmark.X_SCALE) * u, (Wordmark.X_TOP + 18 * Wordmark.X_SCALE) * u)
 
 private val Fly = CubicBezierEasing(0.2f, 0.8f, 0.3f, 1f)
 private val LinearOutSlow = CubicBezierEasing(0f, 0f, 0.58f, 1f)

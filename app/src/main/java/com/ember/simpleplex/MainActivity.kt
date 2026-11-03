@@ -10,13 +10,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +29,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -36,6 +43,9 @@ import com.ember.simpleplex.player.PlayerActivity
 import com.ember.simpleplex.plex.PlexClient
 import com.ember.simpleplex.plex.PlexServer
 import com.ember.simpleplex.ui.AppTheme
+import com.ember.simpleplex.ui.Backdrop
+import com.ember.simpleplex.ui.Backdrops
+import com.ember.simpleplex.ui.LocalScreenBackdrop
 import com.ember.simpleplex.ui.Copy
 import com.ember.simpleplex.ui.FollowTheme
 import com.ember.simpleplex.ui.applyTheme
@@ -56,6 +66,7 @@ import com.ember.simpleplex.ui.Screen
 import com.ember.simpleplex.ui.SearchScreen
 import com.ember.simpleplex.ui.ShowScreen
 import com.ember.simpleplex.ui.SettingsScreen
+import com.ember.simpleplex.ui.introReveal
 import com.ember.simpleplex.ui.introSkipped
 import com.ember.simpleplex.ui.VerseGridScreen
 import com.ember.simpleplex.ui.VerseVideosScreen
@@ -86,9 +97,15 @@ class MainActivity : ComponentActivity() {
                     LocalRefreshBump provides { refresh.intValue++ },
                     LocalBringIntoViewSpec provides PivotScroll.Default,
                 ) {
-                    Box(Modifier.fillMaxSize().background(Palette.Ground)) {
-                        App(plex)
+                    Box(Modifier.fillMaxSize()) {
+                        Backdrop()
+                        Box(Modifier.graphicsLayer { alpha = introReveal; compositingStrategy = CompositingStrategy.ModulateAlpha }) { App(plex) }
                         Intro()
+                    }
+                    // Compose covers the window from here on: drawing its ground too would be one more full-screen pass a frame.
+                    LaunchedEffect(Unit) {
+                        withFrameNanos { }
+                        window.setBackgroundDrawable(null)
                     }
                 }
             }
@@ -189,29 +206,54 @@ class MainActivity : ComponentActivity() {
         // A quick fade and settle between screens; kept short so moving around stays fast.
         AnimatedContent(
             targetState = stack.size - 1 to stack.last(),
-            transitionSpec = {
-                (fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.98f)) togetherWith fadeOut(tween(120))
-            },
+            transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
             label = "screens",
         ) { (depth, s) ->
+            val backdrop = remember { mutableStateOf<ImageBitmap?>(null) }
+            if (transition.targetState == EnterExitState.Visible) SideEffect { Backdrops.shown = backdrop }
+            DisposableEffect(backdrop) { onDispose { if (Backdrops.shown === backdrop) Backdrops.shown = null } }
+            // The new screen fades in once its first frame is drawn: building it can take a few frames' time,
+            // which would otherwise use up the fade. The leaving one fades out at once.
+            val enter = remember { Animatable(0f) }
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                enter.animateTo(1f, tween(180))
+            }
+            val leave by transition.animateFloat({ tween(120) }, label = "leave") { if (it == EnterExitState.PostExit) 0f else 1f }
+            // ModulateAlpha fades each thing drawn instead of the screen as a picture: the TV's GPU can't
+            // afford two full-screen offscreen layers a frame.
+            val fadeAndSettle = Modifier.graphicsLayer {
+                alpha = enter.value * leave
+                val scale = 0.98f + 0.02f * enter.value
+                scaleX = scale
+                scaleY = scale
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            }
             // Keyed by depth, so going back restores the scroll position and focus of the previous screen.
             // And by screen: during the fade, the screen leaving and the one coming can share a depth.
-            states.SaveableStateProvider(stateKey(depth, s)) {
-                when (s) {
-                    Screen.Home -> HomeScreen(home, nav)
-                    Screen.Search -> SearchScreen(home, nav)
-                    Screen.Settings -> SettingsScreen(plex, nav)
-                    is Screen.Grid -> GridScreen(home, s.library, nav)
-                    is Screen.Show -> ShowScreen(copiesOf(plex, s), nav)
-                    is Screen.Folder -> serverOf(plex, s.machineId)?.let { FolderScreen(it, s.library, s.key, s.path, nav) }
-                        ?: Message("This library's server can't be reached right now.")
-                    Screen.PlexVerse -> PlexVerseScreen(plex, nav)
-                    Screen.Kids -> KidsScreen(plex, nav)
-                    Screen.PlexVerseSetup -> PlexVerseSetupScreen(plex, nav)
-                    is Screen.VerseGrid -> VerseGridScreen(plex, s.category, nav)
-                    Screen.VerseVideos -> VerseVideosScreen(plex, nav)
+            Box(fadeAndSettle) {
+                CompositionLocalProvider(LocalScreenBackdrop provides backdrop) {
+                    states.SaveableStateProvider(stateKey(depth, s)) { ScreenContent(s, plex, home, nav) }
                 }
             }
+        }
+    }
+
+    @Composable
+    private fun ScreenContent(s: Screen, plex: PlexClient, home: PlexServer, nav: Nav) {
+        when (s) {
+            Screen.Home -> HomeScreen(home, nav)
+            Screen.Search -> SearchScreen(home, nav)
+            Screen.Settings -> SettingsScreen(plex, nav)
+            is Screen.Grid -> GridScreen(home, s.library, nav)
+            is Screen.Show -> ShowScreen(copiesOf(plex, s), nav)
+            is Screen.Folder -> serverOf(plex, s.machineId)?.let { FolderScreen(it, s.library, s.key, s.path, nav) }
+                ?: Message("This library's server can't be reached right now.")
+            Screen.PlexVerse -> PlexVerseScreen(plex, nav)
+            Screen.Kids -> KidsScreen(plex, nav)
+            Screen.PlexVerseSetup -> PlexVerseSetupScreen(plex, nav)
+            is Screen.VerseGrid -> VerseGridScreen(plex, s.category, nav)
+            Screen.VerseVideos -> VerseVideosScreen(plex, nav)
         }
     }
 

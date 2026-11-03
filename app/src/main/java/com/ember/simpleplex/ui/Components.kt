@@ -4,15 +4,12 @@ package com.ember.simpleplex.ui
 
 import android.os.Build
 import android.view.WindowManager
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -44,6 +41,14 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.foundation.Canvas
+import kotlin.math.max
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import androidx.compose.foundation.background
@@ -596,39 +601,88 @@ fun WideCard(
 /** Set by a focused card on a screen inside [WithBackdrop]: the artwork to show behind it. */
 val LocalBackdrop = staticCompositionLocalOf<MutableState<String?>?> { null }
 
-/**
- * The focused title's artwork behind [content], blurred (Android 12 and up; just faded before) and
- * fading into the ground towards the bottom. It changes once focus has rested for a moment, so
- * scrolling past items doesn't load an image for each of them. Ask for a small image: blurred and
- * scaled up, nobody sees the difference.
- */
+/** The screen's own backdrop picture, which [WithBackdrop] sets; MainActivity gives each screen one. */
+val LocalScreenBackdrop = staticCompositionLocalOf<MutableState<ImageBitmap?>> { mutableStateOf(null) }
+
+/** The picture [Backdrop] shows: MainActivity points it at the backdrop of the screen on top. */
+object Backdrops {
+    var shown by mutableStateOf<State<ImageBitmap?>?>(null)
+}
+
 private var lastBackdrop: ImageBitmap? = null
 
+/**
+ * The focused title's artwork behind [content], blurred and fading into the ground towards the bottom
+ * (see [Backdrop]). It changes once focus has rested for a moment, so scrolling past items doesn't load an
+ * image for each of them. Ask for a small image: scaled up, nobody sees the difference.
+ */
 @Composable
 fun WithBackdrop(content: @Composable () -> Unit) {
     // Saved with the screen, so coming back to it brings its backdrop back too.
     val focused = rememberSaveable { mutableStateOf<String?>(null) }
+    val image = LocalScreenBackdrop.current
     // Starts on the last screen's picture, so a new screen never opens on the bare ground.
-    var image by remember { mutableStateOf(lastBackdrop) }
+    remember(image) { if (image.value == null) image.value = lastBackdrop }
     val context = LocalContext.current
     LaunchedEffect(Unit) {
         val loader = SingletonImageLoader.get(context)
         snapshotFlow { focused.value }.filterNotNull().collectLatest { url ->
             // The first picture comes at once; later ones wait for focus to rest.
-            if (image != null) delay(300)
+            if (image.value != null) delay(300)
             val result = loader.execute(ImageRequest.Builder(context).data(url).build())
-            (result as? SuccessResult)?.let { image = it.image.toBitmap().asImageBitmap().also { b -> lastBackdrop = b } }
+            val picture = (result as? SuccessResult)?.image ?: return@collectLatest
+            image.value = withContext(Dispatchers.Default) { Blur.backdrop(picture.toBitmap()) }.asImageBitmap().also { lastBackdrop = it }
         }
     }
-    Box(Modifier.fillMaxSize()) {
-        Crossfade(image, animationSpec = tween(400), label = "backdrop") { bitmap ->
-            if (bitmap != null) {
-                Image(bitmap, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(24.dp, BlurredEdgeTreatment.Rectangle))
-            }
-        }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Palette.Ground.copy(alpha = 0.55f), 0.8f to Palette.Ground)))
-        CompositionLocalProvider(LocalBackdrop provides focused, content = content)
+    CompositionLocalProvider(LocalBackdrop provides focused, content = content)
+}
+
+/**
+ * The ground, with [Backdrops.shown] on it fading into the ground towards the bottom; a new picture
+ * fades in over the last. Drawn once behind every screen, so changing screens fades only what's in
+ * front, and straight onto the screen: on a TV's GPU every full-screen pass costs, and an offscreen
+ * layer (Crossfade's fade) costs two.
+ */
+@Composable
+fun Backdrop() {
+    // The opening plays on the bare ground; the picture fades in after it.
+    val image = if (introSkipped) Backdrops.shown?.value else null
+    var top by remember { mutableStateOf(image) }
+    var under by remember { mutableStateOf<ImageBitmap?>(null) }
+    val fade = remember { Animatable(1f) }
+    LaunchedEffect(image) {
+        if (image === top) return@LaunchedEffect
+        under = top
+        top = image
+        fade.snapTo(0f)
+        fade.animateTo(1f, tween(400))
+        under = null
     }
+    Canvas(Modifier.fillMaxSize()) {
+        val t = fade.value
+        val over = top
+        val below = under
+        // The ground only where no picture covers it.
+        if (over == null || below == null && t < 1f) drawRect(Palette.Ground)
+        if (below != null) drawCover(below, if (over == null) 1f - t else 1f)
+        if (over != null) drawCover(over, t)
+        // Over the bare ground the gradient adds nothing.
+        if (over != null || below != null) drawRect(Brush.verticalGradient(0f to Palette.Ground.copy(alpha = 0.55f), 0.8f to Palette.Ground))
+    }
+}
+
+/** [image] filling the whole area, cropped like [ContentScale.Crop]. */
+private fun DrawScope.drawCover(image: ImageBitmap, alpha: Float) {
+    val scale = max(size.width / image.width, size.height / image.height)
+    val w = (size.width / scale).roundToInt().coerceAtMost(image.width)
+    val h = (size.height / scale).roundToInt().coerceAtMost(image.height)
+    drawImage(
+        image,
+        srcOffset = IntOffset((image.width - w) / 2, (image.height - h) / 2),
+        srcSize = IntSize(w, h),
+        dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
+        alpha = alpha,
+    )
 }
 
 /** Light tile with an icon, for libraries and folders. Turns dark when focused, like the buttons. */
