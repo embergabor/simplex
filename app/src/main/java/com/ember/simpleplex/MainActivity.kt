@@ -35,8 +35,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.toArgb
 import com.ember.simpleplex.player.PlayerActivity
@@ -81,9 +79,6 @@ class MainActivity : ComponentActivity() {
 
     private val refresh = mutableIntStateOf(0)
 
-    /** How far a screen change has dipped to black: 0 is none, 1 all black. */
-    private val dip = Animatable(0f)
-
     /**
      * A screen reader is on. Only then is the screen described to accessibility services: Compose does it
      * whenever any service is on (on the Sony, the AT4K launcher, which only watches which app is open),
@@ -110,8 +105,6 @@ class MainActivity : ComponentActivity() {
                     Box(Modifier.fillMaxSize().then(if (screenReader.value) Modifier else Modifier.clearAndSetSemantics { })) {
                         Backdrop()
                         Box(Modifier.graphicsLayer { alpha = introReveal; compositingStrategy = CompositingStrategy.ModulateAlpha }) { App(plex) }
-                        // The black of a screen change (see App), over the backdrop too.
-                        Box(Modifier.fillMaxSize().drawBehind { if (dip.value > 0f) drawRect(Color.Black, alpha = dip.value) })
                         Intro()
                     }
                     // Compose covers the window from here on: drawing its ground too would be one more full-screen pass a frame.
@@ -218,28 +211,30 @@ class MainActivity : ComponentActivity() {
             stack.removeAt(stack.lastIndex)
         }
 
-        // Screen changes dip to black: it fades in over the old screen, the new one is built underneath
-        // (70-130 ms on the TV, unseen on a still frame), and the black fades away once it's drawn. One
-        // full-screen rectangle a frame; the screens themselves aren't faded.
-        val target = stack.size - 1 to stack.last()
-        var shown by remember { mutableStateOf(target) }
-        LaunchedEffect(target) {
-            if (target == shown) return@LaunchedEffect
-            dip.animateTo(1f, tween(100))
-            shown = target
-            // The frame that builds the new screen, then the one that draws it.
-            withFrameNanos { }
-            withFrameNanos { }
-            dip.animateTo(0f, tween(150))
-        }
-        val (depth, s) = shown
+        // The new screen replaces the old one at once; only its own content fades in, over the backdrop that
+        // stays put. No fade-out, no scaling, nothing full-screen: the TV's GPU and CPU can't afford them.
+        val depth = stack.size - 1
+        val s = stack.last()
         key(stateKey(depth, s)) {
             val backdrop = remember { mutableStateOf<ImageBitmap?>(null) }
             SideEffect { Backdrops.shown = backdrop }
             DisposableEffect(backdrop) { onDispose { if (Backdrops.shown === backdrop) Backdrops.shown = null } }
+            // From the first frame on: building the screen can take the TV 70-130 ms, which would use up the fade.
+            val enter = remember { Animatable(0f) }
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                enter.animateTo(1f, tween(100))
+            }
+            // ModulateAlpha fades each thing drawn instead of the screen as an offscreen picture.
+            val fadeIn = Modifier.graphicsLayer {
+                alpha = enter.value
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            }
             // Keyed by depth, so going back restores the scroll position and focus of the previous screen.
-            CompositionLocalProvider(LocalScreenBackdrop provides backdrop) {
-                states.SaveableStateProvider(stateKey(depth, s)) { ScreenContent(s, plex, home, nav) }
+            Box(fadeIn) {
+                CompositionLocalProvider(LocalScreenBackdrop provides backdrop) {
+                    states.SaveableStateProvider(stateKey(depth, s)) { ScreenContent(s, plex, home, nav) }
+                }
             }
         }
     }
