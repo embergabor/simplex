@@ -97,6 +97,12 @@ import com.ember.simpleplex.ui.PillButton
 import com.ember.simpleplex.ui.WideCard
 import com.ember.simpleplex.ui.formatDuration
 import kotlinx.coroutines.delay
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.mutableFloatStateOf
+import com.ember.simpleplex.ui.ViewPrefs
+import androidx.compose.ui.platform.LocalContext
+import android.view.SurfaceView
+import android.view.SurfaceHolder
 
 private fun Player.togglePlay() = if (isPlaying) pause() else play()
 
@@ -132,6 +138,8 @@ fun PlayerScreen(
     chapterImage: (String?) -> String?,
     /** The format readout with the controls (Settings); the remote's Info button switches it for this video. */
     showDetails: Boolean,
+    /** The video's surface is about to go: the player has to be released before it does. */
+    onSurfaceGone: () -> Unit,
 ) {
     var visible by remember { mutableStateOf(true) }
     var details by remember(item) { mutableStateOf(showDetails) }
@@ -142,6 +150,13 @@ fun PlayerScreen(
     var isPlaying by remember { mutableStateOf(player.isPlaying) }
     var buffering by remember { mutableStateOf(player.playbackState == Player.STATE_BUFFERING) }
     var picker by remember { mutableStateOf<Int?>(null) } // 2 = audio, 3 = subtitles
+    // Subtitles' height, set from the controls: while placing them, up and down move them and the
+    // controls stay out of the way so they're seen where they'll be.
+    val context = LocalContext.current
+    val viewPrefs = remember { ViewPrefs(context) }
+    var lift by remember { mutableFloatStateOf(viewPrefs.subtitleLift) }
+    var placing by remember { mutableStateOf(false) }
+    var viewHeight by remember { mutableIntStateOf(0) }
     val root = remember { FocusRequester() }
     val scrub = remember { FocusRequester() }
 
@@ -275,6 +290,19 @@ fun PlayerScreen(
             .background(Color.Black)
             .focusRequester(root)
             .onPreviewKeyEvent { e ->
+                if (placing) {
+                    if (e.type == KeyEventType.KeyDown) when (e.key) {
+                        Key.DirectionUp -> lift = (lift + LIFT_STEP).coerceAtMost(MAX_LIFT)
+                        Key.DirectionDown -> lift = (lift - LIFT_STEP).coerceAtLeast(MIN_LIFT)
+                        Key.Back, Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> if (e.nativeKeyEvent.repeatCount == 0) {
+                            placing = false
+                            viewPrefs.subtitleLift = lift
+                            visible = true
+                        }
+                        else -> {}
+                    }
+                    return@onPreviewKeyEvent true
+                }
                 // Back is handled here, both press and release, so focus never steps out of the controls
                 // one level per press: the first press closes the controls, the next one stops playback.
                 if (e.key == Key.Back) {
@@ -333,6 +361,12 @@ fun PlayerScreen(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     useController = false
+                    // Before the player is attached, so this runs before the player lets go of the surface.
+                    (videoSurfaceView as? SurfaceView)?.holder?.addCallback(object : SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: SurfaceHolder) {}
+                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+                        override fun surfaceDestroyed(holder: SurfaceHolder) = onSurfaceGone()
+                    })
                     this.player = player
                     isFocusable = false
                     descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
@@ -354,8 +388,10 @@ fun PlayerScreen(
                 view.subtitleView?.setBottomPaddingFraction(
                     if (controlsShown) 0.38f else SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION
                 )
+                // Moved as a whole, so picture subtitles (Blu-ray, DVD) move as well as text ones.
+                view.subtitleView?.translationY = -lift * viewHeight
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().onSizeChanged { viewHeight = it.height },
         )
 
         if (error != null) {
@@ -391,13 +427,17 @@ fun PlayerScreen(
                 Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = 48.dp),
             )
         }
+        if (placing) SubtitlePlacing(lift)
         if (error == null && visible && item != null) {
             if (details || trackBox != null) InfoBox(info, trackBox, Modifier.align(Alignment.TopStart).padding(start = 40.dp, top = 28.dp))
             Controls(
                 item, duration, audio, subtitle, isPlaying, position, scrubAt, previews, scrub,
                 onPrevious, onNext, onTogglePlay = { player.togglePlay() },
                 modifier = Modifier.align(Alignment.BottomCenter),
-                onPick = { audioStep = null; subtitleStep = null; picker = it },
+                onPick = {
+                    audioStep = null; subtitleStep = null
+                    if (it == PLACE_SUBTITLES) { placing = true; visible = false } else picker = it
+                },
                 onKey = { e ->
                     when (e.key) {
                         Key.DirectionLeft -> { scrub(e.nativeKeyEvent, -1); true }
@@ -484,6 +524,7 @@ private fun Controls(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PillButton("Subtitles: ${subtitle?.let(Describe::trackLabel) ?: "Off"}", { onPick(3) }, icon = Icons.Subtitles)
+                if (subtitle != null) PillButton("Position", { onPick(PLACE_SUBTITLES) }, icon = Icons.Move)
                 PillButton("Audio: ${audio?.let(Describe::trackLabel) ?: "—"}", { onPick(2) }, icon = Icons.Audio)
             }
         }
@@ -602,6 +643,34 @@ private fun ChapterRow(
 }
 
 private val okKeys = setOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)
+
+/** Controls' [onPick] for placing the subtitles, next to 2 (audio) and 3 (subtitles). */
+private const val PLACE_SUBTITLES = 4
+private const val LIFT_STEP = 0.02f
+private const val MIN_LIFT = -0.06f
+private const val MAX_LIFT = 0.6f
+
+/**
+ * Placing the subtitles: how to move them at the top, and a sample line where a text subtitle's last
+ * line now sits, for when nothing is being said.
+ */
+@Composable
+private fun SubtitlePlacing(lift: Float) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Text(
+            "Subtitle position  ·  Up and down move them  ·  OK when done",
+            fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 32.dp)
+                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(50)).padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        val bottom = maxHeight * (SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION + lift)
+        Text(
+            "Subtitles appear here",
+            fontSize = 20.sp, color = Color.White.copy(alpha = 0.7f),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottom.coerceAtLeast(0.dp)),
+        )
+    }
+}
 
 /** Looks like a focused button; OK presses it (handled with the player's keys, so it never takes focus). */
 @Composable

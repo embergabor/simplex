@@ -34,6 +34,7 @@ Android TV 8.0+.
     step through the tracks.
   - Optional readout of the video and audio formats, how the audio reaches the receiver and whether Plex
     is converting anything (Settings, or the remote's Info button).
+  - Subtitles can be moved up or down (Position, next to Subtitles); the height is remembered.
   - Blu-ray (PGS) and DVD (VobSub) subtitles are brightened to true white. Text subtitles get a black
     outline.
   - Back from a video puts focus on the card it was started from.

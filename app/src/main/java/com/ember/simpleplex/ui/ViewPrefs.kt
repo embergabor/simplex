@@ -16,6 +16,11 @@ class ViewPrefs(context: Context) {
         get() = prefs.getBoolean("tunneled", false)
         set(value) { prefs.edit().putBoolean("tunneled", value).apply() }
 
+    /** How far subtitles sit above where the video puts them, as a fraction of the screen's height. */
+    var subtitleLift: Float
+        get() = prefs.getFloat("subtitleLift", 0f)
+        set(value) { prefs.edit().putFloat("subtitleLift", value).apply() }
+
     /** Unwatched episodes' pictures blurred on the show page and in search, so they don't give anything away. */
     var blurUnwatched: Boolean
         get() = prefs.getBoolean("blurUnwatched", false)

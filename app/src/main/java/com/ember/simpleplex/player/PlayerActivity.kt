@@ -196,6 +196,7 @@ class PlayerActivity : ComponentActivity() {
                     preparing = preparing.value,
                     chapterImage = { plex.image(it, 336, 189) },
                     showDetails = showDetails,
+                    onSurfaceGone = { releasePlayer(); finish() },
                 )
             }
         }
@@ -211,14 +212,10 @@ class PlayerActivity : ComponentActivity() {
 
     // Playback never continues in the background. The player must also be released while its video
     // surface still exists: released after it, this TV's MediaTek decoder hangs for about a minute, keeps
-    // playing audio and keeps the hardware decoder busy, so the next video fails to start.
-
-    /** Home button or switching apps. */
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        releasePlayer()
-        finish()
-    }
+    // playing audio and keeps the hardware decoder busy, so the next video fails to start. So it stops
+    // when the surface is about to go (Home, another app), released first (see PlayerScreen's
+    // onSurfaceGone). Something that opens over the video and leaves it showing, like the TV's picture
+    // settings, changes nothing: the player keeps playing as it was.
 
     /** Back, or the end of the queue: runs before the window and its surface are torn down. */
     override fun onPause() {
@@ -226,7 +223,7 @@ class PlayerActivity : ComponentActivity() {
         if (isFinishing) releasePlayer()
     }
 
-    /** Anything else that hides the player. */
+    /** Hidden for good without the surface going first: stops all the same. */
     override fun onStop() {
         super.onStop()
         releasePlayer()
