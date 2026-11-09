@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -37,7 +36,6 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -56,36 +54,30 @@ import com.ember.simpleplex.ui.AppTheme
 import com.ember.simpleplex.ui.Backdrop
 import com.ember.simpleplex.ui.Backdrops
 import com.ember.simpleplex.ui.LocalScreenBackdrop
-import com.ember.simpleplex.ui.Copy
 import com.ember.simpleplex.ui.FollowTheme
 import com.ember.simpleplex.ui.applyTheme
 import com.ember.simpleplex.ui.FolderScreen
 import com.ember.simpleplex.ui.GridScreen
 import com.ember.simpleplex.ui.HomeScreen
 import com.ember.simpleplex.ui.Intro
-import com.ember.simpleplex.ui.KidsScreen
 import com.ember.simpleplex.ui.LocalRefresh
 import com.ember.simpleplex.ui.LocalRefreshBump
 import com.ember.simpleplex.ui.Nav
 import com.ember.simpleplex.ui.Palette
 import com.ember.simpleplex.ui.PivotScroll
 import com.ember.simpleplex.ui.RemoteKeys
-import com.ember.simpleplex.ui.PlexVerseScreen
-import com.ember.simpleplex.ui.PlexVerseSetupScreen
 import com.ember.simpleplex.ui.Screen
 import com.ember.simpleplex.ui.SearchScreen
 import com.ember.simpleplex.ui.ShowScreen
 import com.ember.simpleplex.ui.SettingsScreen
 import com.ember.simpleplex.ui.introReveal
 import com.ember.simpleplex.ui.introSkipped
-import com.ember.simpleplex.ui.VerseGridScreen
-import com.ember.simpleplex.ui.VerseVideosScreen
-import com.ember.simpleplex.ui.Message
-import com.ember.simpleplex.ui.VerseStore
 import com.ember.simpleplex.ui.VoiceSearch
 import com.ember.simpleplex.ui.SignInScreen
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
-private val TOP = setOf(Screen.Home, Screen.PlexVerse, Screen.Kids)
+private val TOP = setOf(Screen.Home)
 
 class MainActivity : ComponentActivity() {
 
@@ -284,30 +276,10 @@ class MainActivity : ComponentActivity() {
             Screen.Search -> SearchScreen(home, nav)
             Screen.Settings -> SettingsScreen(plex, nav)
             is Screen.Grid -> GridScreen(home, s.library, nav)
-            is Screen.Show -> ShowScreen(copiesOf(plex, s), nav)
-            is Screen.Folder -> serverOf(plex, s.machineId)?.let { FolderScreen(it, s.library, s.key, s.path, nav) }
-                ?: Message("This library's server can't be reached right now.")
-            Screen.PlexVerse -> PlexVerseScreen(plex, nav)
-            Screen.Kids -> KidsScreen(plex, nav)
-            Screen.PlexVerseSetup -> PlexVerseSetupScreen(plex, nav)
-            is Screen.VerseGrid -> VerseGridScreen(plex, s.category, nav)
-            Screen.VerseVideos -> VerseVideosScreen(plex, nav)
+            is Screen.Show -> ShowScreen(home, s.show, nav)
+            is Screen.Folder -> FolderScreen(home, s.library, s.key, s.path, nav)
         }
     }
 
     private fun stateKey(depth: Int, screen: Screen) = "$depth:$screen"
-
-    /** The server with [machineId] if PlexVerse has reached it, or the home server for null. */
-    private fun serverOf(plex: PlexClient, machineId: String?): PlexServer? {
-        val home = requireNotNull(plex.home)
-        if (machineId == null || machineId == home.machineId) return home
-        return VerseStore.get(this, plex).connected.value[machineId]
-    }
-
-    /** A show's copies on the servers PlexVerse has reached, or the home server's show. */
-    private fun copiesOf(plex: PlexClient, s: Screen.Show): List<Copy> {
-        val sources = s.sources ?: return listOf(Copy(requireNotNull(plex.home), s.show))
-        val connected = VerseStore.get(this, plex).connected.value
-        return sources.mapNotNull { src -> connected[src.machineId]?.let { Copy(it, src.item) } }
-    }
 }

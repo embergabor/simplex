@@ -22,15 +22,14 @@ object Prefetch {
     private val entries = LinkedHashMap<String, Entry>()
 
     fun start(server: PlexServer, ratingKey: String) {
-        val key = server.ref(ratingKey)
-        if (entries[key]?.let(::fresh) == true) return
-        entries[key] = Entry(SystemClock.elapsedRealtime(), scope.async { server.metadata(ratingKey) })
+        if (entries[ratingKey]?.let(::fresh) == true) return
+        entries[ratingKey] = Entry(SystemClock.elapsedRealtime(), scope.async { server.metadata(ratingKey) })
         while (entries.size > KEPT) entries.remove(entries.keys.first())
     }
 
     /** The prefetched metadata if it's fresh and arrived, else fetched now. */
     suspend fun metadata(server: PlexServer, ratingKey: String): Item {
-        val entry = entries.remove(server.ref(ratingKey))?.takeIf(::fresh)
+        val entry = entries.remove(ratingKey)?.takeIf(::fresh)
         return entry?.let { runCatching { it.item.await() }.getOrNull() } ?: server.metadata(ratingKey)
     }
 

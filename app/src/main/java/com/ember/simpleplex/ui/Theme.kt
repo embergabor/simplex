@@ -1,9 +1,7 @@
 package com.ember.simpleplex.ui
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -14,6 +12,8 @@ import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.lightColorScheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 /** Light, Dark, or Auto: dark between sunset and sunrise. Picked in the top menu, see [FollowTheme]. */
 enum class ThemeMode { Light, Dark, Auto }
@@ -61,9 +61,7 @@ object Palette {
     /** Text and icons on [Ink], as on focused buttons. */
     val OnInk get() = current.onInk
     val Shadow get() = current.shadow
-    /** The Kids button, the same in both themes, with dark text. */
-    val Kids = Color(0xFFFFB340)
-    /** Plex's orange, for the servers circling the TV while PlexVerse loads. */
+    /** Plex's orange, in the logo. */
     val Plex = Color(0xFFE5A00D)
 }
 
@@ -102,17 +100,10 @@ object Icons {
     val Account = stroke("M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 21a8 8 0 0 1 16 0")
     val Info = stroke("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 11v5.5 M12 7.5h.01", width = 1.8f)
     val Eye = stroke("M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z")
-    val Smile = stroke("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M8.5 14a4 4 0 0 0 7 0 M9 9.5h.01 M15 9.5h.01", width = 2f)
     val Previous = fill("M5 5h2.6v14H5z M19.5 5v14L8.5 12z")
     val Next = fill("M16.4 5H19v14h-2.6z M4.5 5v14l11-7z")
     val Play = fill("M7 4.5v15l12.5-7.5z")
     val Pause = fill("M6 4h4v16H6z M14 4h4v16h-4z")
-
-    /** A die showing five: the frame, then the pips as round dots. */
-    val Dice: ImageVector = ImageVector.Builder(defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
-        .addPath(addPathNodes("M7.5 3.5h9a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4h-9a4 4 0 0 1-4-4v-9a4 4 0 0 1 4-4z"), stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f, strokeLineJoin = StrokeJoin.Round)
-        .addPath(addPathNodes("M8.5 8.5h.01 M15.5 8.5h.01 M12 12h.01 M8.5 15.5h.01 M15.5 15.5h.01"), stroke = SolidColor(Color.Black), strokeLineWidth = 2.8f, strokeLineCap = StrokeCap.Round)
-        .build()
 
     private fun stroke(d: String, width: Float = 1.6f) = ImageVector.Builder(
         defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f,

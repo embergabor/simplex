@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,13 +31,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,7 +55,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Surface
@@ -72,26 +68,18 @@ import com.ember.simpleplex.plex.PlexClient
 import com.ember.simpleplex.plex.PlexServer
 import com.ember.simpleplex.update.Updates
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 sealed interface Screen {
     data object Home : Screen
     data object Search : Screen
     data object Settings : Screen
     data class Grid(val library: Library) : Screen
-    /** [sources]: the show's copies across servers (PlexVerse); null for the home server's [show]. */
-    data class Show(val show: Item, val sources: List<Source>? = null) : Screen
-    /** [machineId]: the library's server, for PlexVerse; null for the home server. */
-    data class Folder(val library: Library, val key: String?, val path: List<String>, val machineId: String? = null) : Screen
-    data object PlexVerse : Screen
-    data object Kids : Screen
-    data object PlexVerseSetup : Screen
-    data class VerseGrid(val category: Category) : Screen
-    data object VerseVideos : Screen
+    data class Show(val show: Item) : Screen
+    data class Folder(val library: Library, val key: String?, val path: List<String>) : Screen
 }
 
 // --- Sign in ---
@@ -418,62 +406,28 @@ private fun LetterRail(letters: List<Pair<Char, Int>>, modifier: Modifier, onJum
 
 // --- One show: Play / Shuffle, its favourite episodes, then one row per season ---
 
-/** An episode merged across the servers that have the show, with its copy on each. */
-private class ShowEpisode(val key: String, val item: Item, val copies: List<Copy>) {
-    val entry get() = queueEntry(copies)
-    val server get() = copies.first().server
-}
-
-/**
- * A show from every server in [copies] (in preference order): their episodes merged, each playing from
- * the first server that has it. Usually just one copy, on one server.
- */
+/** A show: Play and Shuffle, its favourite episodes, then one row per season. */
 @Composable
-fun ShowScreen(copies: List<Copy>, nav: Nav) {
-    if (copies.isEmpty()) return Message("None of the servers with this show can be reached right now.")
-    val show = copies.first().item
+fun ShowScreen(plex: PlexServer, show: Item, nav: Nav) {
     val refresh = LocalRefresh.current
-    val result by load(copies, refresh) {
-        val loaded = coroutineScope {
-            copies.map { c ->
-                async {
-                    try {
-                        val episodes = c.server.episodes(c.item.ratingKey)
-                        val section = episodes.firstNotNullOfOrNull { it.librarySectionId } ?: c.item.librarySectionId
-                        // Favourites are extra: if Plex can't list them, the show still opens.
-                        val labelled = section?.let { runCatching { c.server.labelled(it, Episodes.FAVORITE, type = 4) }.getOrNull() }.orEmpty().map { it.ratingKey }.toSet()
-                        Result.success(episodes to labelled)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Result.failure(e)
-                    }
-                }
-            }.awaitAll()
-        }
-        // The servers that answered are enough; only when none did is it an error.
-        if (loaded.none { it.isSuccess }) throw loaded.first().exceptionOrNull()!!
-        // Sources are tagged with their copy's index, which is also the preference order.
-        val sources = loaded.flatMapIndexed { i, r -> r.getOrNull()?.first.orEmpty().map { Source(i.toString(), it) } }
-        val episodes = Verse.merge(sources, copies.indices.map { it.toString() }, Verse::episodeKeys)
-            .sortedWith(compareBy(Episodes.order) { it.item })
-            .map { e -> ShowEpisode(e.key, e.item, e.sources.map { Copy(copies[it.machineId.toInt()].server, it.item) }) }
-        val favorites = episodes.filter { ep ->
-            ep.copies.any { c -> Episodes.isFavorite(c.item) || c.item.ratingKey in loaded[copies.indexOfFirst { it.server == c.server }].getOrNull()?.second.orEmpty() }
-        }
-        episodes to favorites
+    val result by load(show, refresh) {
+        val episodes = Episodes.ordered(plex.episodes(show.ratingKey))
+        val section = episodes.firstNotNullOfOrNull { it.librarySectionId } ?: show.librarySectionId
+        // Favourites are extra: if Plex can't list them, the show still opens.
+        val labelled = section?.let { runCatching { plex.labelled(it, Episodes.FAVORITE, type = 4) }.getOrNull() }.orEmpty().map { it.ratingKey }.toSet()
+        episodes to Episodes.favorites(episodes, labelled)
     }
     val memory = rememberFocusMemory()
-    var menuFor by remember { mutableStateOf<ShowEpisode?>(null) }
+    var menuFor by remember { mutableStateOf<Item?>(null) }
     val context = LocalContext.current
     val blur = remember(refresh) { ViewPrefs(context).blurUnwatched }
     val (episodes, favorites) = result?.getOrElse { return ErrorMessage("Couldn't load ${show.title}.\n${it.message}") } ?: return
     if (episodes.isEmpty()) return Message("${show.title} has no episodes.")
 
-    val next = Episodes.nextUp(episodes.map { it.item })
-    val seasons = episodes.groupBy { it.item.parentIndex ?: 0 }.entries.toList()
+    val next = Episodes.nextUp(episodes)
+    val seasons = episodes.groupBy { it.parentIndex ?: 0 }.entries.toList()
     // The whole show is the queue, so previous and next can go anywhere in it.
-    val playFrom = { i: Int, resume: Boolean -> nav.play(episodes.map { it.entry }, resume = resume, startAt = i, keepQueue = true) }
+    val playFrom = { i: Int, resume: Boolean -> nav.play(episodes.map { it.ratingKey }, resume = resume, startAt = i, keepQueue = true) }
 
     LazyColumn(contentPadding = PaddingValues(vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item(key = "header") {
@@ -483,7 +437,7 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 AsyncImage(
-                    model = copies.first().server.image(show.thumb, 160, 240),
+                    model = plex.image(show.thumb, 160, 240),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.size(80.dp, 120.dp).clip(RoundedCornerShape(7.dp)).background(Palette.Placeholder),
@@ -492,7 +446,7 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
                     Text(show.title, fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         PillButton(
-                            label = "Play ${episodes[next].item.episodeLabel}",
+                            label = "Play ${episodes[next].episodeLabel}",
                             icon = Icons.Play,
                             onClick = { playFrom(next, true) },
                             modifier = Modifier.remembersFocus(memory, "play", default = true),
@@ -500,14 +454,14 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
                         PillButton(
                             label = "Shuffle",
                             icon = Icons.Shuffle,
-                            onClick = { nav.play(episodes.shuffled().map { it.entry }, shuffle = true) },
+                            onClick = { nav.play(episodes.shuffled().map { it.ratingKey }, shuffle = true) },
                             modifier = Modifier.remembersFocus(memory, "shuffle"),
                         )
                         if (favorites.isNotEmpty()) {
                             PillButton(
                                 label = "Shuffle favorites",
                                 icon = Icons.Shuffle,
-                                onClick = { nav.play(favorites.shuffled().map { it.entry }, shuffle = true) },
+                                onClick = { nav.play(favorites.shuffled().map { it.ratingKey }, shuffle = true) },
                                 modifier = Modifier.remembersFocus(memory, "shuffleFavorites"),
                             )
                         }
@@ -525,19 +479,19 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
                             contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
                             horizontalArrangement = Arrangement.spacedBy(20.dp),
                         ) {
-                            itemsIndexed(favorites, key = { _, ep -> ep.key }) { i, ep ->
+                            itemsIndexed(favorites, key = { _, ep -> ep.ratingKey }) { i, ep ->
                                 WideCard(
-                                    imageUrl = ep.server.image(ep.item.thumb, 352, 198, blur = blur && ep.item.unseen),
-                                    title = ep.item.title,
-                                    subtitle = ep.item.episodeLabel,
+                                    imageUrl = plex.image(ep.thumb, 352, 198, blur = blur && ep.unseen),
+                                    title = ep.title,
+                                    subtitle = ep.episodeLabel,
                                     subtitleFirst = true,
-                                    progress = ep.item.progress,
-                                    watched = ep.item.watched,
-                                    onClick = { nav.play(favorites.map { it.entry }, startAt = i, keepQueue = true) },
-                                    prefetch = { ep.server.prefetch(ep.item.ratingKey) },
+                                    progress = ep.progress,
+                                    watched = ep.watched,
+                                    onClick = { nav.play(favorites.map { it.ratingKey }, startAt = i, keepQueue = true) },
+                                    prefetch = { plex.prefetch(ep.ratingKey) },
                                     onLongClick = { menuFor = ep },
                                     width = 176.dp,
-                                    modifier = Modifier.remembersFocus(memory, "fav" + ep.key),
+                                    modifier = Modifier.remembersFocus(memory, "fav" + ep.ratingKey),
                                 )
                             }
                         }
@@ -562,21 +516,21 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
                             contentPadding = PaddingValues(horizontal = 48.dp, vertical = 14.dp),
                             horizontalArrangement = Arrangement.spacedBy(20.dp),
                         ) {
-                            items(eps, key = { it.key }) { ep ->
+                            items(eps, key = { it.ratingKey }) { ep ->
                                 WideCard(
-                                    imageUrl = ep.server.image(ep.item.thumb, 352, 198, blur = blur && ep.item.unseen),
-                                    title = ep.item.title,
-                                    subtitle = listOfNotNull("Episode ${ep.item.index ?: ""}", ep.item.airDate?.let(ItemInfo::date)).joinToString(" · "),
+                                    imageUrl = plex.image(ep.thumb, 352, 198, blur = blur && ep.unseen),
+                                    title = ep.title,
+                                    subtitle = listOfNotNull("Episode ${ep.index ?: ""}", ep.airDate?.let(ItemInfo::date)).joinToString(" · "),
                                     subtitleFirst = true,
-                                    progress = ep.item.progress,
-                                    watched = ep.item.watched,
+                                    progress = ep.progress,
+                                    watched = ep.watched,
                                     onClick = { playFrom(episodes.indexOf(ep), false) },
-                                    prefetch = { ep.server.prefetch(ep.item.ratingKey) },
+                                    prefetch = { plex.prefetch(ep.ratingKey) },
                                     onLongClick = { menuFor = ep },
                                     width = 176.dp,
                                     modifier = Modifier
                                         .then(if (ep == eps.first()) Modifier.focusRequester(firstEpisode) else Modifier)
-                                        .remembersFocus(memory, ep.key),
+                                        .remembersFocus(memory, ep.ratingKey),
                                 )
                             }
                         }
@@ -585,7 +539,7 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
             }
         }
     }
-    menuFor?.let { m -> ItemMenu(m.server, m.item, nav, favorite = m in favorites, copies = m.copies) { menuFor = null } }
+    menuFor?.let { m -> ItemMenu(plex, m, nav, favorite = m in favorites) { menuFor = null } }
 }
 
 // --- Other videos, by folder ---
@@ -648,7 +602,7 @@ fun FolderScreen(plex: PlexServer, library: Library, key: String?, path: List<St
                                     badge = if (v.duration > 0) formatDuration(v.duration) else null,
                                     progress = v.progress,
                                     watched = v.watched,
-                                    onClick = { nav.play(favoritesRow.map { plex.ref(it.ratingKey) }, startAt = i, keepQueue = true) },
+                                    onClick = { nav.play(favoritesRow.map { it.ratingKey }, startAt = i, keepQueue = true) },
                                     prefetch = { plex.prefetch(v.ratingKey) },
                                     onLongClick = { menuFor = v },
                                     width = 198.dp,
@@ -665,7 +619,7 @@ fun FolderScreen(plex: PlexServer, library: Library, key: String?, path: List<St
                 icon = Icons.Folder,
                 label = f.title,
                 horizontal = true,
-                onClick = { nav.push(Screen.Folder(library, f.key, path + f.title, plex.machineId)) },
+                onClick = { nav.push(Screen.Folder(library, f.key, path + f.title)) },
                 modifier = Modifier.fillMaxWidth().height(60.dp).remembersFocus(memory, f.key, default = f.key == firstKey),
             )
         }
@@ -677,7 +631,7 @@ fun FolderScreen(plex: PlexServer, library: Library, key: String?, path: List<St
                 badge = if (v.duration > 0) formatDuration(v.duration) else null,
                 progress = v.progress,
                 watched = v.watched,
-                onClick = { nav.play(videos.drop(videos.indexOf(v)).map { plex.ref(it.ratingKey) }) },
+                onClick = { nav.play(videos.drop(videos.indexOf(v)).map { it.ratingKey }) },
                 prefetch = { plex.prefetch(v.ratingKey) },
                 onLongClick = { menuFor = v },
                 modifier = Modifier.remembersFocus(memory, v.ratingKey, default = v.ratingKey == firstKey),

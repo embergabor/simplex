@@ -10,7 +10,7 @@ Android TV 8.0+.
 ## What it does
 
 - **Home:** Continue watching (the one place OK resumes) and your video libraries as tiles, under a
-  menu with Search, Home, PlexVerse, Kids and Settings. The focused title's artwork fills the background,
+  menu with Search, Home and Settings. The focused title's artwork fills the background,
   blurred. Music and photo libraries are left out.
 - **Libraries:** a grid of 2:3 posters, A–Z (with a letter rail on the right to jump), by date added or by
   year. Show posters count their unwatched episodes. "Other videos" libraries are browsed by folder.
@@ -20,13 +20,6 @@ Android TV 8.0+.
   episodes (Plex label `fav`) and one row per season. Audio and subtitle languages are remembered per show.
 - **Search** across the libraries on Home, including episode descriptions, typed or spoken into the
   remote's mic.
-- **PlexVerse:** every Plex server your account can reach, merged into one Movies, Series and Videos
-  view, with a Continue watching row across them. A title on several servers shows once, plays from the
-  first server in your order that's reachable, and its progress goes to every copy. Customize sorts each
-  server's libraries into the categories.
-- **Kids:** when PlexVerse keeps kids' libraries separate, their movies and series in one grid of big
-  posters. Surprise me! spins a reel of their posters, stops on a random one and plays it after a short
-  countdown (a series plays a random episode).
 - **Player** (Media3 ExoPlayer):
   - Direct play. Video only goes through the TV's hardware decoder, which also does the deinterlacing.
     Video the TV can't decode (VC-1 on many TVs) is converted by Plex instead of playing as a black picture.

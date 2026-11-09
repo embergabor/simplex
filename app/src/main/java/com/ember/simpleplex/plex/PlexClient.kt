@@ -50,7 +50,6 @@ class PlexClient private constructor(context: Context) {
         prefs.edit().remove("serverUri").remove("token").remove("machineId").remove("serverName")
             .remove("accountToken").remove("resources").apply()
         home = null
-        connected.clear()
     }
 
     internal val http = OkHttpClient.Builder()
@@ -126,28 +125,17 @@ class PlexClient private constructor(context: Context) {
         throw IOException("Couldn't reach a Plex server on this account")
     }
 
-    /** Keeps the account token of an install signed in before it was kept, once plex.tv accepts it. */
-    suspend fun linkAccount(accountToken: String) {
-        fetchServers(accountToken)
-        this.accountToken = accountToken
-    }
-
-    // --- Every server the account can reach ---
+    // --- The account's servers on plex.tv ---
 
     /** A server from plex.tv: the account's own or one shared with it, with its own access token. */
     data class ServerInfo(val machineId: String, val name: String, val owned: Boolean, val accessToken: String, val uris: List<String>)
 
-    /** The servers as last listed by [servers], so PlexVerse can start without waiting on plex.tv. */
-    val cachedServers: List<ServerInfo>
-        get() = prefs.getString("resources", null)?.let { runCatching { parseResources(it, accountToken ?: "") }.getOrNull() }.orEmpty()
-
-    /** Lists the servers on plex.tv (needs [accountToken]) and keeps the answer for [cachedServers]. */
+    /** Lists the servers on plex.tv (needs [accountToken]). */
     suspend fun servers(): List<ServerInfo> = fetchServers(requireNotNull(accountToken) { "Not signed in to plex.tv" })
 
     private suspend fun fetchServers(accountToken: String): List<ServerInfo> {
         val json = call(request("$PLEX_TV/resources?includeHttps=1&includeRelay=1", accountToken).build())
         val servers = parseResources(json, accountToken)
-        prefs.edit().putString("resources", json).apply()
         // Installs from before the home server's id was kept: it's the one with the same token.
         val h = home
         if (h != null && h.machineId == null) servers.find { it.accessToken == h.token }?.let { s ->
@@ -155,25 +143,6 @@ class PlexClient private constructor(context: Context) {
             home = PlexServer(h.uri, h.token, s.machineId, this, s.name)
         }
         return servers
-    }
-
-    private val connected = ConcurrentHashMap<String, PlexServer>()
-
-    /**
-     * A connection to one server, picked the first time it's needed: every candidate address is tried
-     * at once and the first that answers is kept (also as a hint for next time). Null if none answers.
-     */
-    suspend fun server(machineId: String): PlexServer? {
-        connected[machineId]?.let { return it }
-        home?.takeIf { it.machineId == machineId }?.let { return it }
-        val info = (cachedServers.find { it.machineId == machineId } ?: runCatching { servers() }.getOrNull()?.find { it.machineId == machineId }) ?: return null
-        val hint = prefs.getString("uri-$machineId", null)
-        val uri = firstAnswering(listOfNotNull(hint) + info.uris, info.accessToken)
-            // The saved list may be out of date (a new IP): ask plex.tv where the server is now.
-            ?: runCatching { servers() }.getOrNull()?.find { it.machineId == machineId }?.let { firstAnswering(it.uris, it.accessToken) }
-            ?: return null
-        prefs.edit().putString("uri-$machineId", uri).apply()
-        return PlexServer(uri, info.accessToken, machineId, this, info.name).also { connected[machineId] = it }
     }
 
     private val relocating = ConcurrentHashMap<String, Mutex>()

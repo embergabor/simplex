@@ -29,8 +29,6 @@ class PlexServer(uri: String, val token: String, val machineId: String?, private
         }
     }
 
-    /** An item on this server as the player's queue takes it: "machineId|ratingKey", or the bare key if the id isn't known. */
-    fun ref(ratingKey: String) = machineId?.let { "$it|$ratingKey" } ?: ratingKey
 
     /** For reports that must outlive a screen (timeline, watched state). */
     fun fire(block: suspend PlexServer.() -> Unit) = client.fire { block() }
@@ -164,10 +162,6 @@ class PlexServer(uri: String, val token: String, val machineId: String?, private
 
     suspend fun timeline(ratingKey: String, state: String, timeMs: Long, durationMs: Long) =
         send("/:/timeline?ratingKey=$ratingKey&key=%2Flibrary%2Fmetadata%2F$ratingKey&state=$state&time=$timeMs&duration=$durationMs&identifier=com.plexapp.plugins.library")
-
-    /** Saves where playback stopped, without showing as "now playing" (for the copies on other servers). */
-    suspend fun setProgress(ratingKey: String, timeMs: Long) =
-        send("/:/progress?key=$ratingKey&identifier=com.plexapp.plugins.library&time=$timeMs&state=stopped")
 
     /** Takes an item off Continue watching without marking it watched (until it's played again). */
     suspend fun removeFromContinueWatching(ratingKey: String) =

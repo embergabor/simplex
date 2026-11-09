@@ -4,9 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -19,6 +17,8 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 /** Set by MainActivity on any key, and once Home has its content: the logo shows once per start of the app. */
 var introSkipped by mutableStateOf(false)
@@ -77,13 +77,4 @@ private object Wordmark {
     const val WIDTH = X_AT + 40 * X_SCALE
 
     private fun path(d: String) = PathParser().parsePathString(d).toPath()
-}
-
-/** Plex's chevron, [s] wide and high either side of [at]. */
-internal fun DrawScope.drawChevron(at: Offset, s: Float, color: Color, alpha: Float) {
-    val path = Path().apply {
-        moveTo(at.x - s, at.y - s); lineTo(at.x - 0.1f * s, at.y - s); lineTo(at.x + s, at.y)
-        lineTo(at.x - 0.1f * s, at.y + s); lineTo(at.x - s, at.y + s); lineTo(at.x + 0.1f * s, at.y); close()
-    }
-    drawPath(path, color, alpha)
 }
