@@ -9,14 +9,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.EnterExitState
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Box
@@ -28,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.DisposableEffect
@@ -40,7 +35,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import com.ember.simpleplex.player.PlayerActivity
-import kotlinx.coroutines.delay
 import com.ember.simpleplex.plex.PlexClient
 import com.ember.simpleplex.plex.PlexServer
 import com.ember.simpleplex.ui.AppTheme
@@ -75,9 +69,6 @@ import com.ember.simpleplex.ui.Message
 import com.ember.simpleplex.ui.VerseStore
 import com.ember.simpleplex.ui.VoiceSearch
 import com.ember.simpleplex.ui.SignInScreen
-
-/** How long the leaving screen takes to fade out, in ms. */
-private const val LEAVE_MS = 120
 
 private val TOP = setOf(Screen.Home, Screen.PlexVerse, Screen.Kids)
 
@@ -207,44 +198,29 @@ class MainActivity : ComponentActivity() {
             stack.removeAt(stack.lastIndex)
         }
 
-        // A quick fade and settle between screens; kept short so moving around stays fast.
-        AnimatedContent(
-            targetState = stack.size - 1 to stack.last(),
-            transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
-            label = "screens",
-        ) { (depth, s) ->
+        // The new screen replaces the old one at once; only its own content fades in, over the backdrop that
+        // stays put. No fade-out, no scaling, nothing full-screen: the TV's GPU and CPU can't afford them.
+        val depth = stack.size - 1
+        val s = stack.last()
+        key(stateKey(depth, s)) {
             val backdrop = remember { mutableStateOf<ImageBitmap?>(null) }
-            if (transition.targetState == EnterExitState.Visible) SideEffect { Backdrops.shown = backdrop }
+            SideEffect { Backdrops.shown = backdrop }
             DisposableEffect(backdrop) { onDispose { if (Backdrops.shown === backdrop) Backdrops.shown = null } }
-            // Building a screen takes the TV 70-130 ms, a pause that broke up the fades. So the leaving screen
-            // fades out first, the new one is built once it has gone, while nothing moves, and fades in once
-            // its first frame is drawn. The first screen is built at once.
-            var built by remember { mutableStateOf(transition.currentState == EnterExitState.Visible) }
+            // From the first frame on: building the screen can take the TV 70-130 ms, which would use up the fade.
             val enter = remember { Animatable(0f) }
-            LaunchedEffect(built) {
-                if (!built) {
-                    delay(LEAVE_MS.toLong())
-                    built = true
-                    return@LaunchedEffect
-                }
+            LaunchedEffect(Unit) {
                 withFrameNanos { }
-                enter.animateTo(1f, tween(180))
+                enter.animateTo(1f, tween(100))
             }
-            val leave by transition.animateFloat({ tween(LEAVE_MS) }, label = "leave") { if (it == EnterExitState.PostExit) 0f else 1f }
-            // ModulateAlpha fades each thing drawn instead of the screen as a picture: the TV's GPU can't
-            // afford two full-screen offscreen layers a frame.
-            val fadeAndSettle = Modifier.graphicsLayer {
-                alpha = enter.value * leave
-                val scale = 0.98f + 0.02f * enter.value
-                scaleX = scale
-                scaleY = scale
+            // ModulateAlpha fades each thing drawn instead of the screen as an offscreen picture.
+            val fadeIn = Modifier.graphicsLayer {
+                alpha = enter.value
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
             // Keyed by depth, so going back restores the scroll position and focus of the previous screen.
-            // And by screen: during the fade, the screen leaving and the one coming can share a depth.
-            Box(fadeAndSettle) {
+            Box(fadeIn) {
                 CompositionLocalProvider(LocalScreenBackdrop provides backdrop) {
-                    if (built) states.SaveableStateProvider(stateKey(depth, s)) { ScreenContent(s, plex, home, nav) }
+                    states.SaveableStateProvider(stateKey(depth, s)) { ScreenContent(s, plex, home, nav) }
                 }
             }
         }

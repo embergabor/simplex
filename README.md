@@ -48,8 +48,9 @@ Android TV 8.0+.
   readout; blurred pictures of episodes you haven't started (no spoilers); which libraries show on Home;
   the server, and waking it with Wake-on-LAN when it's asleep (its MAC address is typed in once); clearing the cached thumbnails and artwork;
   installing a newer version from GitHub; signing out.
-- **Made for slow TVs:** a short opening animation, screen changes that fade out and in, and focus that
-  lifts the card with a shadow, all drawn to keep 60 fps on a TV's modest GPU and CPU.
+- **Made for slow TVs:** the logo while the app starts, new screens whose content fades in quickly over a
+  steady backdrop, and focus that lifts the card with a shadow, all kept cheap enough for 60 fps on a
+  TV's modest GPU and CPU.
 
 ## Build and install
 

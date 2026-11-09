@@ -655,7 +655,7 @@ fun Backdrop() {
         under = top
         top = image
         fade.snapTo(0f)
-        fade.animateTo(1f, tween(400))
+        fade.animateTo(1f, tween(200))
         under = null
     }
     Canvas(Modifier.fillMaxSize()) {

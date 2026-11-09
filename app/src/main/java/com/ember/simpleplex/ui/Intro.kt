@@ -1,29 +1,13 @@
 package com.ember.simpleplex.ui
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.Easing
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.withFrameNanos
-import androidx.compose.foundation.layout.Box
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.unit.Density
-import kotlin.math.min
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -36,28 +20,22 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
 
-/** Set by MainActivity on any key, and once the opening has played: it plays once per start of the app. */
+/** Set by MainActivity on any key, and once Home is ready: the logo shows once per start of the app. */
 var introSkipped by mutableStateOf(false)
 
-/**
- * How much of the app the opening lets through: none until it opens up, all once it's over. Hidden
- * rather than covered, so the TV doesn't draw the screen underneath for nothing.
- */
-val introReveal get() = if (introSkipped) 1f else revealed.floatValue
-private val revealed = mutableFloatStateOf(0f)
+/** The app is hidden under the logo rather than covered, so the TV doesn't draw it for nothing. */
+val introReveal get() = if (introSkipped) 1f else 0f
 
 /**
- * The opening, about 1.2 s: the two play buttons of the x fly in and click together, "simple" slides
- * in beside them, then the camera dives through the gap of the x into Home. Drawn on the ground while
- * the app loads unseen (see [introReveal]) and takes keys all along; never focusable.
+ * The logo, still, on the ground while the app starts unseen (see [introReveal]); Home replaces it at
+ * once when ready. It takes no keys and is never focusable.
  */
 @Composable
 fun Intro() {
     if (introSkipped) return
-    val time = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        // A cold start's first frames are slow (the window's buffers, Home's first layout). Starting once
-        // frames come steadily keeps them from swallowing the first half of the opening.
+        // A cold start's first frames are slow (the window's buffers, Home's first layout): Home is ready
+        // once frames come steadily.
         val start = withFrameNanos { it }
         var last = start
         var steady = 0
@@ -66,48 +44,20 @@ fun Intro() {
             steady = if (now - last < 25_000_000L) steady + 1 else 0
             last = now
         }
-        time.animateTo(END, tween(END.toInt(), easing = LinearEasing)) { revealed.floatValue = span(value, 952f, END, LinearEasing) }
         introSkipped = true
     }
-    // Nothing in the picture moves once the dive starts: from then on it is kept as an offscreen layer
-    // that only grows and fades. Drawing the paths anew at up to 14 times their size each frame was more
-    // than the TV could do in a frame.
-    val drawn by remember { derivedStateOf { min(time.value, DIVE) } }
     val ink = Palette.Ink
-    Box(Modifier.fillMaxSize()) {
-        Canvas(
-            Modifier.fillMaxSize().graphicsLayer {
-                val t = time.value
-                val zoom = 1f + 13f * span(t, DIVE, END, CubicBezierEasing(0.55f, 0f, 0.8f, 0.2f))
-                val gap = gapOf(size, wordmarkUnit())
-                scaleX = zoom
-                scaleY = zoom
-                transformOrigin = TransformOrigin(gap.x / size.width, gap.y / size.height)
-                alpha = 1f - span(t, 1054f, END, LinearEasing)
-                compositingStrategy = if (t >= DIVE) CompositingStrategy.Offscreen else CompositingStrategy.Auto
-            },
-        ) {
-            val t = drawn
-            val u = wordmarkUnit()
-            val origin = originOf(size, u)
-            translate(origin.x, origin.y) {
-                scale(u, pivot = Offset.Zero) {
-                    val word = span(t, 408f, 748f, LinearOutSlow)
-                    translate(15f * (1f - word)) {
-                        drawPath(Wordmark.sim, ink, word)
-                        drawPath(Wordmark.ple, Palette.Plex, word)
-                    }
-                    // The halves fly in from a third of the screen away, overshoot a little and click.
-                    val far = size.width / 3 / u
-                    val apart = if (t < 408f) far * (1f - span(t, 0f, 408f, Fly)) - 2.5f * span(t, 0f, 408f, Fly)
-                    else -2.5f * (1f - span(t, 408f, 510f, Fly))
-                    val click = 1f + 0.18f * if (t < 493f) span(t, 408f, 493f, LinearOutSlow) else 1f - span(t, 493f, 612f, LinearOutSlow)
-                    val shown = span(t, 0f, 136f, LinearEasing)
-                    translate(Wordmark.X_AT, Wordmark.X_TOP) {
-                        scale(Wordmark.X_SCALE * click, pivot = Offset(20f, 18f)) {
-                            drawHalf(Wordmark.left, Offset(-apart, 0f), Palette.Plex, shown)
-                            drawHalf(Wordmark.right, Offset(apart, 0f), PlexDeep, shown)
-                        }
+    Canvas(Modifier.fillMaxSize()) {
+        val u = 90.dp.toPx() / 100 // pixels per wordmark unit (1 em = 100)
+        // The left end of the baseline, with the wordmark centred.
+        translate(center.x - Wordmark.WIDTH / 2 * u, center.y + 36.5f * u) {
+            scale(u, pivot = Offset.Zero) {
+                drawPath(Wordmark.sim, ink)
+                drawPath(Wordmark.ple, Palette.Plex)
+                translate(Wordmark.X_AT, Wordmark.X_TOP) {
+                    scale(Wordmark.X_SCALE, pivot = Offset(20f, 18f)) {
+                        drawHalf(Wordmark.left, Palette.Plex)
+                        drawHalf(Wordmark.right, PlexDeep)
                     }
                 }
             }
@@ -115,31 +65,11 @@ fun Intro() {
     }
 }
 
-/** Where the dive starts and the opening ends, in ms. */
-private const val DIVE = 850f
-private const val END = 1190f
-
-/** [easing] over [from] to [to] ms, at [t]. */
-private fun span(t: Float, from: Float, to: Float, easing: Easing = FastOutSlowInEasing) =
-    easing.transform(((t - from) / (to - from)).coerceIn(0f, 1f))
-
-/** Pixels per wordmark unit (1 em = 100). */
-private fun Density.wordmarkUnit() = 90.dp.toPx() / 100
-
-/** The left end of the wordmark's baseline, centred in [size]. */
-private fun originOf(size: Size, u: Float) = Offset(size.width / 2 - Wordmark.WIDTH / 2 * u, size.height / 2 + 36.5f * u)
-
-/** The gap of the x, which the dive goes through. */
-private fun gapOf(size: Size, u: Float) =
-    originOf(size, u) + Offset((Wordmark.X_AT + 20 * Wordmark.X_SCALE) * u, (Wordmark.X_TOP + 18 * Wordmark.X_SCALE) * u)
-
-private val Fly = CubicBezierEasing(0.2f, 0.8f, 0.3f, 1f)
-private val LinearOutSlow = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 private val PlexDeep = Color(0xFFB9800A)
 
-private fun DrawScope.drawHalf(path: Path, by: Offset, color: Color, alpha: Float) = translate(by.x, by.y) {
-    drawPath(path, color, alpha)
-    drawPath(path, color, alpha, Stroke(width = 4f, join = StrokeJoin.Round))
+private fun DrawScope.drawHalf(path: Path, color: Color) {
+    drawPath(path, color)
+    drawPath(path, color, style = Stroke(width = 4f, join = StrokeJoin.Round))
 }
 
 /** The "simplex" wordmark: Inter SemiBold letters from tools/wordmark.py, 100 units to the em, baseline at 0. */
