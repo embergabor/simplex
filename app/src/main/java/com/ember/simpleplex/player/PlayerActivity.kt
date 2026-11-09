@@ -21,6 +21,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
@@ -37,11 +38,13 @@ import com.ember.simpleplex.plex.Item
 import com.ember.simpleplex.plex.Part
 import com.ember.simpleplex.plex.PlexClient
 import com.ember.simpleplex.plex.PlexServer
+import com.ember.simpleplex.plex.Prefetch
 import com.ember.simpleplex.plex.Stream
 import com.ember.simpleplex.ui.AppTheme
 import com.ember.simpleplex.ui.ViewPrefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -142,6 +145,10 @@ class PlayerActivity : ComponentActivity() {
             .setLoadControl(loadControl())
             .setMediaSourceFactory(DefaultMediaSourceFactory(this).setSubtitleParserFactory(SubtitleParsers()))
             .build()
+        // Settings' tunneled playback: ExoPlayer uses it only where the TV's decoder and audio output support it.
+        if (ViewPrefs(this).tunneled) (player.trackSelector as? DefaultTrackSelector)?.let {
+            it.setParameters(it.buildUponParameters().setTunnelingEnabled(true))
+        }
         player.addListener(listener)
         // Debug builds log ExoPlayer's track mapping, renderer support and decoders (logcat tag EventLogger).
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) player.addAnalyticsListener(EventLogger())
@@ -315,7 +322,7 @@ class PlayerActivity : ComponentActivity() {
                         continue
                     }
                     val item = try {
-                        server.metadata(key)
+                        Prefetch.metadata(server, key)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -356,16 +363,17 @@ class PlayerActivity : ComponentActivity() {
             val plexSubtitle = PlexTracks.subtitleStreams(part).firstOrNull { it.selected }
             val chosen = languages.audioFor(part, plexAudio)
             subtitle.value = languages.subtitleFor(part, plexSubtitle)
-            // Plex converts whatever is selected on the server, so a different pick is saved there first.
-            if (chosen?.id != plexAudio?.id || subtitle.value?.id != plexSubtitle?.id) {
-                runCatching { plex.selectStreams(part.id, chosen?.id, subtitle.value?.id ?: 0) }
-            }
+            // Plex converts whatever is selected on the server, so a different pick is saved there. Direct
+            // play doesn't need it and starts at once; a conversion waits for it.
+            val saved = if (chosen?.id != plexAudio?.id || subtitle.value?.id != plexSubtitle?.id) {
+                async { runCatching { plex.selectStreams(part.id, chosen?.id, subtitle.value?.id ?: 0) } }
+            } else null
             val plan = PlexTracks.planAudio(part, chosen, caps::supportsEncoding)
 
             // Cleared once something plays, so a fallback to another server still resumes.
             val start = if (resume) item.viewOffset else 0L
             val direct = { s: Stream? -> audio.value = s; playDirect(item, part, start) }
-            val convert = { audio.value = plan.stream; playConverted(start) }
+            val convert = { launch { saved?.await(); audio.value = plan.stream; playConverted(start) }; Unit }
             when (plan.choice) {
                 PlexTracks.AudioChoice.PLAY -> direct(plan.stream)
                 PlexTracks.AudioChoice.CONVERT -> convert()

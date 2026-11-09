@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -198,9 +199,11 @@ fun SearchScreen(plex: PlexServer, nav: Nav) {
 
     val terms = remember(query) { SearchMatch.terms(query) }
     val searching = query.trim().length >= 2
-    val found = remember(terms, loaded) {
-        val libraries = loaded?.getOrNull() ?: return@remember null
-        libraries.mapNotNull { lib ->
+    // Matched away from the main thread: every title and episode description on each keystroke held up
+    // typing. The last results stay until the new ones are ready.
+    val found by produceState<List<Found>?>(null, terms, loaded) {
+        val libraries = loaded?.getOrNull() ?: run { value = null; return@produceState }
+        value = withContext(Dispatchers.Default) { libraries.mapNotNull { lib ->
             val items = lib.items.filter { (_, text) -> SearchMatch.matches(terms, text) }.map { it.first }
             val shows = lib.episodes
                 .filter { (_, own, show) -> SearchMatch.matches(terms, own, show) }
@@ -208,7 +211,7 @@ fun SearchScreen(plex: PlexServer, nav: Nav) {
                 .groupBy { it.grandparentRatingKey }
                 .map { (_, eps) -> (eps.first().grandparentTitle ?: "") to eps.take(MAX_EPISODES) }
             if (items.isEmpty() && shows.isEmpty()) null else Found(lib.library, items, shows)
-        }
+        } }
     }
 
     // Spoken, it's a finished search: no keyboard.
@@ -306,6 +309,7 @@ fun SearchScreen(plex: PlexServer, nav: Nav) {
         }
 
         val failure = loaded?.exceptionOrNull()
+        val found = found
         when {
             failure != null -> item(span = { GridItemSpan(maxLineSpan) }) {
                 ErrorMessage("Couldn't load your libraries.\n${failure.message}", Modifier.fillMaxWidth())
@@ -369,6 +373,7 @@ private fun LazyGridScope.results(plex: PlexServer, nav: Nav, f: Found, blur: Bo
     val wide = lib.kind == Library.Kind.OTHER
     items(f.items, key = { lib.key + "/" + it.ratingKey }, span = { GridItemSpan(if (wide) 3 else 2) }) { item ->
         val open = { if (item.type == "show") nav.push(Screen.Show(item)) else nav.play(listOf(item.ratingKey)) }
+        val prefetch = if (item.type == "show") null else ({ plex.prefetch(item.ratingKey) })
         if (wide) {
             WideCard(
                 imageUrl = plex.image(item.thumb, 396, 223),
@@ -379,6 +384,7 @@ private fun LazyGridScope.results(plex: PlexServer, nav: Nav, f: Found, blur: Bo
                 watched = item.watched,
                 onClick = open,
                 onLongClick = { onMenu(item) },
+                prefetch = prefetch,
             )
         } else {
             PosterCard(
@@ -389,6 +395,7 @@ private fun LazyGridScope.results(plex: PlexServer, nav: Nav, f: Found, blur: Bo
                 unwatched = item.unwatchedEpisodes,
                 onClick = open,
                 onLongClick = { onMenu(item) },
+                prefetch = prefetch,
             )
         }
     }
@@ -413,6 +420,7 @@ private fun LazyGridScope.results(plex: PlexServer, nav: Nav, f: Found, blur: Bo
                                 progress = ep.progress,
                                 watched = ep.watched,
                                 onClick = { nav.play(listOf(ep.ratingKey)) },
+                                prefetch = { plex.prefetch(ep.ratingKey) },
                                 onLongClick = { onMenu(ep) },
                                 width = 176.dp,
                             )

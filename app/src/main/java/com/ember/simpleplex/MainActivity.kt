@@ -1,10 +1,12 @@
 package com.ember.simpleplex
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.speech.RecognizerIntent
 import android.view.KeyEvent
+import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -33,6 +35,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.toArgb
 import com.ember.simpleplex.player.PlayerActivity
 import com.ember.simpleplex.plex.PlexClient
@@ -75,6 +78,13 @@ private val TOP = setOf(Screen.Home, Screen.PlexVerse, Screen.Kids)
 class MainActivity : ComponentActivity() {
 
     private val refresh = mutableIntStateOf(0)
+
+    /**
+     * A screen reader is on. Only then is the screen described to accessibility services: Compose does it
+     * whenever any service is on (on the Sony, the AT4K launcher, which only watches which app is open),
+     * and it took about a quarter of the main thread's time after each screen change.
+     */
+    private val screenReader = mutableStateOf(false)
     private var started = false
 
     @OptIn(ExperimentalFoundationApi::class)
@@ -92,7 +102,7 @@ class MainActivity : ComponentActivity() {
                     LocalRefreshBump provides { refresh.intValue++ },
                     LocalBringIntoViewSpec provides PivotScroll.Default,
                 ) {
-                    Box(Modifier.fillMaxSize()) {
+                    Box(Modifier.fillMaxSize().then(if (screenReader.value) Modifier else Modifier.clearAndSetSemantics { })) {
                         Backdrop()
                         Box(Modifier.graphicsLayer { alpha = introReveal; compositingStrategy = CompositingStrategy.ModulateAlpha }) { App(plex) }
                         Intro()
@@ -143,6 +153,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        screenReader.value = getSystemService(AccessibilityManager::class.java)?.let {
+            it.isEnabled && (it.isTouchExplorationEnabled || it.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_SPOKEN).isNotEmpty())
+        } ?: false
         // Coming back from the player: progress and watched marks have changed.
         if (started) refresh.intValue++
         started = true

@@ -11,6 +11,11 @@ class ViewPrefs(context: Context) {
         get() = prefs.getBoolean("playbackDetails", false)
         set(value) { prefs.edit().putBoolean("playbackDetails", value).apply() }
 
+    /** Video and sound kept in step by the TV's own hardware (tunneled playback), from the next video on. */
+    var tunneled: Boolean
+        get() = prefs.getBoolean("tunneled", false)
+        set(value) { prefs.edit().putBoolean("tunneled", value).apply() }
+
     /** Unwatched episodes' pictures blurred on the show page and in search, so they don't give anything away. */
     var blurUnwatched: Boolean
         get() = prefs.getBoolean("blurUnwatched", false)

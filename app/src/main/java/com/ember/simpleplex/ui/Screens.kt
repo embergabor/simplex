@@ -212,6 +212,7 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
                                     watched = false,
                                     // The one place, with the show page's Play, that continues where it was left.
                                     onClick = { playedFrom.played(item.ratingKey); nav.play(listOf(item.ratingKey), resume = true) },
+                                    prefetch = { plex.prefetch(item.ratingKey) },
                                     onLongClick = { menuFor = item },
                                     width = 200.dp,
                                     modifier = Modifier
@@ -336,6 +337,7 @@ fun GridScreen(plex: PlexServer, library: Library, nav: Nav) {
                         if (library.kind == Library.Kind.SHOWS) nav.push(Screen.Show(item)) else nav.play(listOf(item.ratingKey))
                     },
                     onLongClick = { menuFor = item },
+                    prefetch = if (library.kind == Library.Kind.SHOWS) null else ({ plex.prefetch(item.ratingKey) }),
                     modifier = Modifier.focusRequester(jump).remembersFocus(memory, item.ratingKey, default = item == items.first()),
                 )
             }
@@ -532,6 +534,7 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
                                     progress = ep.item.progress,
                                     watched = ep.item.watched,
                                     onClick = { nav.play(favorites.map { it.entry }, startAt = i, keepQueue = true) },
+                                    prefetch = { ep.server.prefetch(ep.item.ratingKey) },
                                     onLongClick = { menuFor = ep },
                                     width = 176.dp,
                                     modifier = Modifier.remembersFocus(memory, "fav" + ep.key),
@@ -568,6 +571,7 @@ fun ShowScreen(copies: List<Copy>, nav: Nav) {
                                     progress = ep.item.progress,
                                     watched = ep.item.watched,
                                     onClick = { playFrom(episodes.indexOf(ep), false) },
+                                    prefetch = { ep.server.prefetch(ep.item.ratingKey) },
                                     onLongClick = { menuFor = ep },
                                     width = 176.dp,
                                     modifier = Modifier
@@ -645,6 +649,7 @@ fun FolderScreen(plex: PlexServer, library: Library, key: String?, path: List<St
                                     progress = v.progress,
                                     watched = v.watched,
                                     onClick = { nav.play(favoritesRow.map { plex.ref(it.ratingKey) }, startAt = i, keepQueue = true) },
+                                    prefetch = { plex.prefetch(v.ratingKey) },
                                     onLongClick = { menuFor = v },
                                     width = 198.dp,
                                     modifier = Modifier.remembersFocus(memory, "fav" + v.ratingKey, default = "fav" + v.ratingKey == firstKey),
@@ -673,6 +678,7 @@ fun FolderScreen(plex: PlexServer, library: Library, key: String?, path: List<St
                 progress = v.progress,
                 watched = v.watched,
                 onClick = { nav.play(videos.drop(videos.indexOf(v)).map { plex.ref(it.ratingKey) }) },
+                prefetch = { plex.prefetch(v.ratingKey) },
                 onLongClick = { menuFor = v },
                 modifier = Modifier.remembersFocus(memory, v.ratingKey, default = v.ratingKey == firstKey),
             )

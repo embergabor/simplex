@@ -44,9 +44,10 @@ Android TV 8.0+.
   - Blu-ray (PGS) and DVD (VobSub) subtitles are brightened to true white. Text subtitles get a black
     outline.
   - Back from a video puts focus on the card it was started from.
-- **Settings:** light, dark, or dark between sunset and sunrise where the server is; the playback
-  readout; blurred pictures of episodes you haven't started (no spoilers); which libraries show on Home;
-  the server, and waking it with Wake-on-LAN when it's asleep (its MAC address is typed in once); clearing the cached thumbnails and artwork;
+- **Settings:** light, dark, or dark between sunset and sunrise where the server is; the playback readout;
+  tunneled playback (video and sound kept in step by the TV's hardware); blurred pictures of episodes you
+  haven't started (no spoilers); which libraries show on Home; the server, and waking it with Wake-on-LAN
+  when it's asleep (its MAC address is typed in once); clearing the cached thumbnails and artwork;
   installing a newer version from GitHub; signing out.
 - **Made for slow TVs:** the logo while the app starts, new screens whose content fades in quickly over a
   steady backdrop, and focus that lifts the card with a shadow, all kept cheap enough for 60 fps on a

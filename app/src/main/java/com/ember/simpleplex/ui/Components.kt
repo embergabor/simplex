@@ -22,7 +22,6 @@ import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.window.DialogWindowProvider
 import coil3.request.SuccessResult
-import coil3.request.crossfade
 import coil3.toBitmap
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
@@ -76,6 +75,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.IntState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -395,8 +395,9 @@ private fun animateLift(focused: Boolean): State<Float> =
  * The title under a lifted card slides down by as much as the card's bottom edge moves, so it stays
  * readable. Both follow the same [lift].
  */
-private fun Modifier.followCard(lift: State<Float>, cardHeight: Int): Modifier =
-    graphicsLayer { translationY = cardHeight * (FOCUSED_SCALE - 1f) * lift.value / 2f }
+private fun Modifier.followCard(lift: State<Float>, cardHeight: IntState): Modifier =
+    // Both read only while drawing: the card's height arriving after layout doesn't build the card again.
+    graphicsLayer { translationY = cardHeight.intValue * (FOCUSED_SCALE - 1f) * lift.value / 2f }
 
 /**
  * OK clicks; holding OK (its first repeat) is a long click, as on tv-material's cards. Only a press
@@ -426,10 +427,8 @@ private fun Artwork(url: String?, fallback: String) {
     // calmer than text that flickers and then gets replaced.
     Box(Modifier.fillMaxSize().background(Palette.Placeholder), contentAlignment = Alignment.Center) {
         if (url != null) {
-            val context = LocalContext.current
-            // A short fade for posters that load; ones already in memory show at once.
-            val request = remember(url) { ImageRequest.Builder(context).data(url).crossfade(150).build() }
-            AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            // No fade as it loads: a grid opening would animate every poster at once.
+            AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else {
             Text(
                 fallback, modifier = Modifier.padding(10.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
@@ -487,10 +486,15 @@ private fun ArtCard(
     cornerIcon: ImageVector? = null,
     backdrop: String? = null,
     unwatched: Int = 0,
+    prefetch: (() -> Unit)? = null,
 ) {
     val backdropState = LocalBackdrop.current
+    val currentPrefetch by rememberUpdatedState(prefetch)
     LaunchedEffect(focused) {
-        if (focused && backdrop != null) backdropState?.value = backdrop
+        if (!focused) return@LaunchedEffect
+        if (backdrop != null) backdropState?.value = backdrop
+        // Once focus rests, as for the backdrop: scrolling past cards doesn't fetch each of them.
+        currentPrefetch?.let { delay(300); it() }
     }
     Box(
         modifier.fillMaxWidth().aspectRatio(aspect).onSizeChanged { onHeight(it.height) }
@@ -504,7 +508,8 @@ private fun ArtCard(
                 val s = 1f + (FOCUSED_SCALE - 1f) * lift.value
                 scaleX = s
                 scaleY = s
-                shadowElevation = 18.dp.toPx() * lift.value.coerceIn(0f, 1f)
+                // At full strength at once: a shadow growing with the spring is drawn anew every frame.
+                shadowElevation = if (focused) 18.dp.toPx() else 0f
                 // A light glow in dark mode, where a shadow vanishes (Android 9+; older TVs keep the shadow).
                 ambientShadowColor = Palette.Shadow
                 spotShadowColor = Palette.Shadow
@@ -551,13 +556,15 @@ fun PosterCard(
     backdrop: String? = null,
     /** A show's unwatched episodes, counted in the corner. */
     unwatched: Int = 0,
+    /** Fetches what playing it needs, once focus rests on it (see [com.ember.simpleplex.plex.Prefetch]). */
+    prefetch: (() -> Unit)? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val lift = animateLift(focused)
-    var cardHeight by remember { mutableIntStateOf(0) }
+    val cardHeight = remember { mutableIntStateOf(0) }
     Column(Modifier.zIndex(if (focused) 1f else 0f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ArtCard(imageUrl, title, 2f / 3f, progress, watched, badge, onClick, onLongClick, interaction, focused, lift, { cardHeight = it }, modifier, cornerIcon, backdrop, unwatched)
+        ArtCard(imageUrl, title, 2f / 3f, progress, watched, badge, onClick, onLongClick, interaction, focused, lift, { cardHeight.intValue = it }, modifier, cornerIcon, backdrop, unwatched, prefetch)
         // Two lines, so long titles can be read; always two, so the grid's rows line up.
         Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Ink, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.followCard(lift, cardHeight).padding(horizontal = 2.dp))
     }
@@ -578,16 +585,17 @@ fun WideCard(
     subtitleFirst: Boolean = false,
     badge: String? = null,
     backdrop: String? = null,
+    prefetch: (() -> Unit)? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val lift = animateLift(focused)
-    var cardHeight by remember { mutableIntStateOf(0) }
+    val cardHeight = remember { mutableIntStateOf(0) }
     Column(
         modifier = (if (width != null) Modifier.width(width) else Modifier).zIndex(if (focused) 1f else 0f),
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        ArtCard(imageUrl, title, 16f / 9f, progress, watched, badge, onClick, onLongClick, interaction, focused, lift, { cardHeight = it }, modifier, backdrop = backdrop)
+        ArtCard(imageUrl, title, 16f / 9f, progress, watched, badge, onClick, onLongClick, interaction, focused, lift, { cardHeight.intValue = it }, modifier, backdrop = backdrop, prefetch = prefetch)
         Column(Modifier.followCard(lift, cardHeight).padding(horizontal = 2.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             val small: @Composable (String) -> Unit = { Text(it, fontSize = 9.5.sp, color = Palette.Secondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             val big: @Composable (String) -> Unit = { Text(it, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis) }

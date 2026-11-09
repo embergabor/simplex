@@ -213,6 +213,7 @@ private fun ContinueRow(plex: PlexClient, store: VerseStore, kids: Boolean, nav:
                         progress = item.progress,
                         watched = false,
                         onClick = { playedFrom.played(c.sources.first().ref); nav.play(listOf(c.sources.joinToString(",") { it.ref }), resume = true) },
+                        prefetch = connected[c.sources.first().machineId]?.let { s -> { s.prefetch(c.sources.first().item.ratingKey) } },
                         onLongClick = if (kids) null else ({ menuFor = c }),
                         width = 200.dp,
                         modifier = Modifier
@@ -390,6 +391,8 @@ fun VerseGridScreen(plex: PlexClient, category: Category?, nav: Nav) {
                     },
                     // The menu acts on the copies on servers that answered, so it needs one.
                     onLongClick = { if (!kids && entry.sources.any { it.machineId in connected }) menuFor = entry },
+                    prefetch = if (entry.item.type == "show") null
+                    else entry.sources.firstOrNull { it.machineId in connected }?.let { s -> { connected.getValue(s.machineId).prefetch(s.item.ratingKey) } },
                     modifier = Modifier.remembersFocus(memory, entry.key, default = entry == entries.first()),
                 )
             }

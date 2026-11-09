@@ -78,6 +78,7 @@ private enum class Section(val title: String, val icon: ImageVector, val about: 
     Update("Update", Icons.Next, "A newer version is on GitHub. Android asks to confirm the install (and, the first time, to allow Simplex to install apps)."),
     Appearance("Appearance", Icons.Sun, "Light, dark, or dark between sunset and sunrise where the server is. OK switches."),
     Details("Playback details", Icons.Info, "The format readout in the player's corner, with the controls: video, HDR, and how the audio reaches the receiver. The remote's Info button shows or hides it during a video. OK switches."),
+    Tunneling("Tunneled playback", Icons.Play, "Video and sound kept in step by the TV's own hardware instead of by Simplex. Less work for the app and can tighten lip sync with the receiver, but some TVs handle it badly. From the next video on. OK switches."),
     Spoilers("Unwatched episodes", Icons.Eye, "Blurs the pictures of episodes you haven't started, on the show page and in search, so they don't give anything away. OK switches."),
     Libraries("Libraries on Home", Icons.Folder, "Checked libraries are shown on Home; hidden ones keep their place for when they come back."),
     Server("Server", Icons.Tv, "The Plex server this TV plays from, and waking it up when it's asleep."),
@@ -98,6 +99,7 @@ fun SettingsScreen(plex: PlexClient, nav: Nav) {
     val view = remember { ViewPrefs(context) }
     var details by remember { mutableStateOf(view.playbackDetails) }
     var blur by remember { mutableStateOf(view.blurUnwatched) }
+    var tunneled by remember { mutableStateOf(view.tunneled) }
     var hidden by remember { mutableStateOf(prefs.hidden) }
     val libraries by load(Unit) { requireNotNull(plex.home).libraries() }
     var cleared by remember { mutableStateOf(0) }
@@ -126,6 +128,7 @@ fun SettingsScreen(plex: PlexClient, nav: Nav) {
             ThemeMode.Auto -> "Auto · dark after sunset"
         }
         Section.Details -> if (details) "Shown" else "Hidden"
+        Section.Tunneling -> if (tunneled) "On" else "Off"
         Section.Spoilers -> if (blur) "Pictures blurred" else "Pictures shown"
         Section.Libraries -> when {
             libraries?.isFailure == true -> "Server unreachable"
@@ -158,6 +161,7 @@ fun SettingsScreen(plex: PlexClient, nav: Nav) {
                 Palette.mode = next
             }
             Section.Details -> { details = !details; view.playbackDetails = details }
+            Section.Tunneling -> { tunneled = !tunneled; view.tunneled = tunneled }
             Section.Spoilers -> { blur = !blur; view.blurUnwatched = blur }
             Section.Storage -> scope.launch {
                 withContext(Dispatchers.IO) { Caches.clear(context) }

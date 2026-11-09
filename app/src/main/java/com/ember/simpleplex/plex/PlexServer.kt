@@ -111,6 +111,9 @@ class PlexServer(uri: String, val token: String, val machineId: String?, private
     }
 
     /** Full metadata including streams, intro/credits markers and chapters, needed before playback. */
+    /** Starts fetching [metadata] ahead of playing, see [Prefetch]. */
+    fun prefetch(ratingKey: String) = Prefetch.start(this, ratingKey)
+
     suspend fun metadata(ratingKey: String): Item {
         val mc = get("/library/metadata/$ratingKey?includeMarkers=1&includeChapters=1")
         val item = mc.items().first()
