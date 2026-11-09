@@ -4,6 +4,10 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.view.PixelCopy
+import android.os.Looper
+import android.os.Handler
+import android.graphics.Bitmap
 import android.speech.RecognizerIntent
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityManager
@@ -35,6 +39,14 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.toArgb
 import com.ember.simpleplex.player.PlayerActivity
@@ -79,6 +91,10 @@ class MainActivity : ComponentActivity() {
 
     private val refresh = mutableIntStateOf(0)
 
+    /** The screen as it was, over the next one until that has its content; [coverFade] fades it away. */
+    private var cover by mutableStateOf<ImageBitmap?>(null)
+    private val coverFade = Animatable(1f)
+
     /**
      * A screen reader is on. Only then is the screen described to accessibility services: Compose does it
      * whenever any service is on (on the Sony, the AT4K launcher, which only watches which app is open),
@@ -105,6 +121,8 @@ class MainActivity : ComponentActivity() {
                     Box(Modifier.fillMaxSize().then(if (screenReader.value) Modifier else Modifier.clearAndSetSemantics { })) {
                         Backdrop()
                         Box(Modifier.graphicsLayer { alpha = introReveal; compositingStrategy = CompositingStrategy.ModulateAlpha }) { App(plex) }
+                        // The last screen, held over the next until that has its content (see App).
+                        cover?.let { picture -> Canvas(Modifier.fillMaxSize()) { drawImage(picture, alpha = coverFade.value) } }
                         Intro()
                     }
                     // Compose covers the window from here on: drawing its ground too would be one more full-screen pass a frame.
@@ -139,6 +157,8 @@ class MainActivity : ComponentActivity() {
             if (event.action == KeyEvent.ACTION_UP && listen()) return true
             if (event.action == KeyEvent.ACTION_DOWN) return true
         }
+        // The next screen is still loading under the picture of the last one: keys would act unseen.
+        if (cover != null && event.keyCode != KeyEvent.KEYCODE_BACK) return true
         RemoteKeys.repeating = event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0
         if (event.action == KeyEvent.ACTION_DOWN) introSkipped = true
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
@@ -165,6 +185,7 @@ class MainActivity : ComponentActivity() {
     private fun App(plex: PlexClient) {
         var signedIn by remember { mutableStateOf(plex.isSignedIn) }
         if (!signedIn) {
+            LaunchedEffect(Unit) { introSkipped = true }
             SignInScreen(plex) { signedIn = true }
             return
         }
@@ -211,31 +232,48 @@ class MainActivity : ComponentActivity() {
             stack.removeAt(stack.lastIndex)
         }
 
-        // The new screen replaces the old one at once; only its own content fades in, over the backdrop that
-        // stays put. No fade-out, no scaling, nothing full-screen: the TV's GPU and CPU can't afford them.
-        val depth = stack.size - 1
-        val s = stack.last()
+        // A new screen starts empty while its content loads. So the screen as it was stays up, as a picture,
+        // until the new one has its content (it takes focus then; two seconds at most), and then gives way
+        // to it with a short crossfade. One full-screen picture while it lasts; the screens aren't faded.
+        val target = stack.size - 1 to stack.last()
+        var shown by remember { mutableStateOf(target) }
+        LaunchedEffect(target) {
+            if (target == shown) return@LaunchedEffect
+            cover = snapshot()?.asImageBitmap()
+            coverFade.snapTo(1f)
+            shown = target
+        }
+        val (depth, s) = shown
         key(stateKey(depth, s)) {
             val backdrop = remember { mutableStateOf<ImageBitmap?>(null) }
             SideEffect { Backdrops.shown = backdrop }
             DisposableEffect(backdrop) { onDispose { if (Backdrops.shown === backdrop) Backdrops.shown = null } }
-            // From the first frame on: building the screen can take the TV 70-130 ms, which would use up the fade.
-            val enter = remember { Animatable(0f) }
+            val focused = remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
+                withTimeoutOrNull(2000) { snapshotFlow { focused.value }.first { it } }
+                // The first screen: the opening's logo gives way to it.
+                introSkipped = true
+                if (cover == null) return@LaunchedEffect
                 withFrameNanos { }
-                enter.animateTo(1f, tween(100))
-            }
-            // ModulateAlpha fades each thing drawn instead of the screen as an offscreen picture.
-            val fadeIn = Modifier.graphicsLayer {
-                alpha = enter.value
-                compositingStrategy = CompositingStrategy.ModulateAlpha
+                coverFade.animateTo(0f, tween(150))
+                cover = null
             }
             // Keyed by depth, so going back restores the scroll position and focus of the previous screen.
-            Box(fadeIn) {
+            Box(Modifier.onFocusChanged { focused.value = it.hasFocus }) {
                 CompositionLocalProvider(LocalScreenBackdrop provides backdrop) {
                     states.SaveableStateProvider(stateKey(depth, s)) { ScreenContent(s, plex, home, nav) }
                 }
             }
+        }
+    }
+
+    /** The window as it looks now, or null if Android can't copy it. */
+    private suspend fun snapshot(): Bitmap? {
+        val view = window.decorView
+        if (view.width == 0 || view.height == 0) return null
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        return suspendCancellableCoroutine { done ->
+            PixelCopy.request(window, bitmap, { result -> done.resume(bitmap.takeIf { result == PixelCopy.SUCCESS }) }, Handler(Looper.getMainLooper()))
         }
     }
 

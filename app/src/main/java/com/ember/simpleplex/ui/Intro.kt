@@ -7,7 +7,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -20,7 +20,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
 
-/** Set by MainActivity on any key, and once Home is ready: the logo shows once per start of the app. */
+/** Set by MainActivity on any key, and once Home has its content: the logo shows once per start of the app. */
 var introSkipped by mutableStateOf(false)
 
 /** The app is hidden under the logo rather than covered, so the TV doesn't draw it for nothing. */
@@ -28,22 +28,14 @@ val introReveal get() = if (introSkipped) 1f else 0f
 
 /**
  * The logo, still, on the ground while the app starts unseen (see [introReveal]); Home replaces it at
- * once when ready. It takes no keys and is never focusable.
+ * once when it has its content. It takes no keys and is never focusable.
  */
 @Composable
 fun Intro() {
     if (introSkipped) return
+    // MainActivity lifts it once Home has its content; this only keeps it from staying if that never comes.
     LaunchedEffect(Unit) {
-        // A cold start's first frames are slow (the window's buffers, Home's first layout): Home is ready
-        // once frames come steadily.
-        val start = withFrameNanos { it }
-        var last = start
-        var steady = 0
-        while (steady < 3 && last - start < 1_500_000_000L) {
-            val now = withFrameNanos { it }
-            steady = if (now - last < 25_000_000L) steady + 1 else 0
-            last = now
-        }
+        delay(3000)
         introSkipped = true
     }
     val ink = Palette.Ink
