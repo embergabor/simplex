@@ -15,7 +15,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -63,14 +62,12 @@ enum class Trouble {
 private fun online(context: Context) =
     context.getSystemService(ConnectivityManager::class.java)?.activeNetwork != null
 
-/** A wake signal goes out when the server stops answering, then again this often while it stays silent. */
-private const val WAKE_EVERY_TRIES = 6
-
 /**
  * A load that failed ([what]: "Couldn't load Movies."). It says what's wrong as far as it can tell and
- * offers the way out: a server that doesn't answer is woken without being asked (with its address
- * saved in Settings), a TV without network gets its network settings, a refused sign-in signing in
- * again. Settings stays in reach, since this takes Home's place. Tries again by itself every few
+ * offers the way out: waking a server that doesn't answer (with its address saved in Settings), the
+ * network settings for a TV without network, signing in again after a refused sign-in. The server is
+ * only ever woken by the button: it may be off on purpose. Settings stays in reach, since this takes
+ * Home's place. Tries again by itself every few
  * seconds, or right away with the button; a retry reloads every screen's data (the same refresh as
  * coming back from the player), and this stays until something loads.
  */
@@ -87,14 +84,10 @@ fun ErrorMessage(what: String, error: Throwable, nav: Nav?, modifier: Modifier =
         wake = runCatching { WakeOnLan.send(mac, PlexClient.get(context).home?.uri) }
             .fold({ "Wake signal sent. It can take a minute to start." }, { "Couldn't send the wake signal: ${it.message}" })
     }
-    val unreachable by rememberUpdatedState(trouble == Trouble.UNREACHABLE)
     LaunchedEffect(Unit) {
         withFrameNanos { }
         runCatching { first.requestFocus() }
-        var tries = 0
         while (true) {
-            if (unreachable && mac != null && tries % WAKE_EVERY_TRIES == 0) wakeNow(mac)
-            tries++
             delay(5000)
             retry()
         }
@@ -110,7 +103,7 @@ fun ErrorMessage(what: String, error: Throwable, nav: Nav?, modifier: Modifier =
         val (title, detail) = when (trouble) {
             Trouble.OFFLINE -> "This TV isn't connected to the network." to "Check its cable or Wi-Fi. $again"
             Trouble.UNREACHABLE -> "Your Plex server isn't answering." to when {
-                mac != null -> "${wake ?: "Waking it up."} $again"
+                mac != null -> "${wake ?: "It may be asleep or switched off."} $again"
                 else -> "It may be asleep or switched off. To wake it from here, add its network address in Settings, under Server. $again"
             }
             Trouble.SIGN_IN -> "Plex no longer accepts this TV's sign-in." to "Sign in again to go on."
@@ -131,8 +124,8 @@ fun ErrorMessage(what: String, error: Throwable, nav: Nav?, modifier: Modifier =
                     settings?.let { PillButton("Settings", it) }
                 }
                 Trouble.UNREACHABLE -> if (mac != null) {
-                    PillButton("Try again now", retry, focused)
-                    PillButton("Wake again", { scope.launch { wakeNow(mac) } })
+                    PillButton("Wake server", { scope.launch { wakeNow(mac) } }, focused)
+                    PillButton("Try again now", retry)
                     settings?.let { PillButton("Settings", it) }
                 } else {
                     // Without the address nothing here can wake it: Settings is the way on.

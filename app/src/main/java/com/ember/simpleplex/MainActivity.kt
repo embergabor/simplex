@@ -50,7 +50,6 @@ import androidx.compose.ui.graphics.toArgb
 import com.embergabor.simplex.core.player.PlayerActivity
 import com.embergabor.simplex.core.plex.PlexClient
 import com.embergabor.simplex.core.plex.PlexServer
-import com.embergabor.simplex.core.plex.WakeOnLan
 import com.ember.simpleplex.ui.Backdrop
 import com.ember.simpleplex.ui.Backdrops
 import com.ember.simpleplex.ui.LocalScreenBackdrop
@@ -101,9 +100,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val plex = PlexClient.get(this)
         applyTheme(this)
-        // A sleeping server takes a while to start, so it's woken as the app opens rather than after
-        // the first request has failed. An awake one ignores it.
-        WakeOnLan.Prefs(this).mac?.let { mac -> plex.fire { WakeOnLan.send(mac, plex.home?.uri) } }
         // The window shows before Compose draws: same ground, so a dark start doesn't flash grey.
         window.setBackgroundDrawable(ColorDrawable(Palette.Ground.toArgb()))
         setContent {

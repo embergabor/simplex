@@ -43,10 +43,10 @@ Android TV 8.0+.
   haven't started (no spoilers); which libraries show on Home; the server, and waking it with Wake-on-LAN
   when it's asleep (its MAC address is typed in once); clearing the cached thumbnails and artwork;
   installing a newer version from GitHub; signing out.
-- **When the server doesn't answer:** Simplex wakes it by itself (as the app opens, and while it stays
-  silent) if its network address is saved, keeps trying, and says what's wrong: the TV off the network
-  (with its network settings one press away), the server not answering, or a sign-in Plex no longer
-  accepts. Settings stays in reach.
+- **When the server doesn't answer:** Simplex keeps trying and says what's wrong: the TV off the network
+  (with its network settings one press away), the server not answering (with a Wake server button if its
+  network address is saved; it's never woken unasked), or a sign-in Plex no longer accepts. Settings
+  stays in reach.
 - **Made for slow TVs:** the logo until Home has its content; when you open a screen, the last one stays
   until the next has its content, then gives way with a short crossfade, so you never see an empty
   screen. Focus lifts the card with a shadow. All kept cheap enough for 60 fps on a TV's modest GPU and CPU.
