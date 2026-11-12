@@ -73,7 +73,7 @@ android {
 dependencies {
     // The Plex connection, the player and the player's look (github.com/embergabor/simplex-core);
     // brings Compose, Media3, Coil and OkHttp.
-    implementation("com.embergabor:simplex-core:0.1.0")
+    implementation("com.embergabor:simplex-core:0.1.1")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     baselineProfile(project(":baselineprofile"))
 
