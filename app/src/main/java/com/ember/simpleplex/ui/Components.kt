@@ -320,49 +320,6 @@ fun Modifier.entersOnFirst(state: LazyListState, first: FocusRequester): Modifie
     }
 }
 
-/**
- * A load that failed, usually because the server is asleep or still starting (e.g. after Wake-on-LAN).
- * Tries again by itself every few seconds, or right away with the button. A retry reloads every screen's
- * data (the same refresh as coming back from the player), and the message stays until something loads.
- */
-@Composable
-fun ErrorMessage(text: String, modifier: Modifier = Modifier.fillMaxSize()) {
-    val retry = LocalRefreshBump.current
-    val button = remember { FocusRequester() }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val mac = remember { WakeOnLan.Prefs(context).mac }
-    var woken by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
-        withFrameNanos { }
-        runCatching { button.requestFocus() }
-        while (true) {
-            delay(5000)
-            retry()
-        }
-    }
-    Column(
-        modifier.padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
-    ) {
-        Text(text, fontSize = 15.sp, color = Palette.Secondary, textAlign = TextAlign.Center)
-        Text(woken ?: "Trying again every few seconds.", fontSize = 12.sp, color = Palette.Secondary)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            // With a MAC address saved in Settings, waking is the likely fix, so it gets the focus.
-            if (mac != null) {
-                PillButton("Wake server", {
-                    scope.launch {
-                        woken = runCatching { WakeOnLan.send(mac, PlexClient.get(context).home?.uri) }
-                            .fold({ "Wake sent. Trying again every few seconds while it starts." }, { "Couldn't send the wake: ${it.message}" })
-                    }
-                }, Modifier.focusRequester(button))
-            }
-            PillButton("Try again now", retry, if (mac == null) Modifier.focusRequester(button) else Modifier)
-        }
-    }
-}
-
 // --- Backdrop ---
 
 /** The screen's own backdrop picture, which [WithBackdrop] sets; MainActivity gives each screen one. */

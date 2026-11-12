@@ -171,10 +171,10 @@ fun HomeScreen(plex: PlexServer, nav: Nav) {
     // Read again on every visit: Settings changes it.
     val hidden = remember(refresh) { LibraryPrefs(context).hidden }
 
-    val allLibraries = libs?.getOrElse { return ErrorMessage("Couldn't reach your Plex server.\n${it.message}") } ?: return
+    val allLibraries = libs?.getOrElse { return ErrorMessage("Couldn't load your libraries.", it, nav) } ?: return Connecting()
     val libraries = allLibraries.filter { it.key !in hidden }
     // Hiding a library also hides what you were watching in it.
-    val continuing = (cont?.getOrNull() ?: if (cont == null) return else emptyList())
+    val continuing = (cont?.getOrNull() ?: if (cont == null) return Connecting() else emptyList())
         .filter { it.librarySectionId == null || it.librarySectionId !in hidden }
 
     // Scrolls if the rows don't all fit, following focus.
@@ -282,7 +282,7 @@ fun GridScreen(plex: PlexServer, library: Library, nav: Nav) {
     val scope = rememberCoroutineScope()
     // A letter picked in the A–Z column: its first poster takes focus once it's on screen.
     var jumpTo by remember { mutableStateOf<String?>(null) }
-    val all = result?.getOrElse { return ErrorMessage("Couldn't load ${library.title}.\n${it.message}") } ?: return
+    val all = result?.getOrElse { return ErrorMessage("Couldn't load ${library.title}.", it, nav) } ?: return
     if (all.isEmpty()) return Message("${library.title} is empty.")
     val items = remember(all, sort) { sort.apply(all) }
     val letters = remember(items, sort) { if (sort == GridSort.TITLE) GridSort.letters(items) else emptyList() }
@@ -429,7 +429,7 @@ fun ShowScreen(plex: PlexServer, show: Item, nav: Nav) {
     var menuFor by remember { mutableStateOf<Item?>(null) }
     val context = LocalContext.current
     val blur = remember(refresh) { ViewPrefs(context).blurUnwatched }
-    val (episodes, favorites) = result?.getOrElse { return ErrorMessage("Couldn't load ${show.title}.\n${it.message}") } ?: return
+    val (episodes, favorites) = result?.getOrElse { return ErrorMessage("Couldn't load ${show.title}.", it, nav) } ?: return
     if (episodes.isEmpty()) return Message("${show.title} has no episodes.")
 
     val next = Episodes.nextUp(episodes)
@@ -563,7 +563,7 @@ fun FolderScreen(plex: PlexServer, library: Library, key: String?, path: List<St
     }
     val memory = rememberFocusMemory()
     var menuFor by remember { mutableStateOf<Item?>(null) }
-    val (entries, favorites) = result?.getOrElse { return ErrorMessage("Couldn't load this folder.\n${it.message}") } ?: return
+    val (entries, favorites) = result?.getOrElse { return ErrorMessage("Couldn't load this folder.", it, nav) } ?: return
     if (entries.isEmpty()) return Message("This folder is empty.")
 
     val folders = entries.filterIsInstance<FolderEntry.Folder>()

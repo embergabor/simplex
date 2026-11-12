@@ -318,7 +318,7 @@ fun SearchScreen(plex: PlexServer, nav: Nav) {
         val found = found
         when {
             failure != null -> item(span = { GridItemSpan(maxLineSpan) }) {
-                ErrorMessage("Couldn't load your libraries.\n${failure.message}", Modifier.fillMaxWidth())
+                ErrorMessage("Couldn't load your libraries.", failure, nav, Modifier.fillMaxWidth())
             }
             !searching -> {}
             found == null -> hint("Loading your libraries…")

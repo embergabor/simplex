@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- To tell a TV that's off the network from a server that doesn't answer. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Installing updates from GitHub releases; Android asks the viewer before each one. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
