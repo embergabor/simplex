@@ -60,18 +60,26 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
-import com.ember.simpleplex.plex.Episodes
-import com.ember.simpleplex.plex.FolderEntry
-import com.ember.simpleplex.plex.Item
-import com.ember.simpleplex.plex.Library
-import com.ember.simpleplex.plex.PlexClient
-import com.ember.simpleplex.plex.PlexServer
+import com.embergabor.simplex.core.plex.Episodes
+import com.embergabor.simplex.core.plex.FolderEntry
+import com.embergabor.simplex.core.plex.Item
+import com.embergabor.simplex.core.plex.Library
+import com.embergabor.simplex.core.plex.PlexClient
+import com.embergabor.simplex.core.plex.PlexServer
 import com.ember.simpleplex.update.Updates
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import com.embergabor.simplex.core.ui.Palette
+import com.embergabor.simplex.core.ui.Icons
+import com.embergabor.simplex.core.ui.PosterCard
+import com.embergabor.simplex.core.ui.WideCard
+import com.embergabor.simplex.core.ui.IconTile
+import com.embergabor.simplex.core.ui.PillButton
+import com.embergabor.simplex.core.ui.formatDuration
+import com.embergabor.simplex.core.ui.timeLeft
 
 sealed interface Screen {
     data object Home : Screen

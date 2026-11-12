@@ -8,6 +8,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import com.embergabor.simplex.core.ui.ThemeMode
 
 class ThemeTest {
 

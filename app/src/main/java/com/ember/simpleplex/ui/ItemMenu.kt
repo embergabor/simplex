@@ -37,11 +37,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
-import com.ember.simpleplex.player.Describe
-import com.ember.simpleplex.player.PlexTracks
-import com.ember.simpleplex.plex.Episodes
-import com.ember.simpleplex.plex.Item
-import com.ember.simpleplex.plex.PlexServer
+import com.embergabor.simplex.core.player.Describe
+import com.embergabor.simplex.core.player.PlexTracks
+import com.embergabor.simplex.core.plex.Episodes
+import com.embergabor.simplex.core.plex.Item
+import com.embergabor.simplex.core.plex.PlexServer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -49,6 +49,10 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import com.embergabor.simplex.core.ui.Palette
+import com.embergabor.simplex.core.ui.PillButton
+import com.embergabor.simplex.core.ui.okKeys
+import com.embergabor.simplex.core.ui.formatDuration
 
 // --- Hold-OK menu ---
 

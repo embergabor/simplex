@@ -1,6 +1,6 @@
 package com.ember.simpleplex.ui
 
-import com.ember.simpleplex.plex.Item
+import com.embergabor.simplex.core.plex.Item
 import java.text.Normalizer
 
 /** How a movie or show library's grid is ordered. */

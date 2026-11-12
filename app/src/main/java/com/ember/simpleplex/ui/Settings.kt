@@ -63,8 +63,9 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import coil3.SingletonImageLoader
-import com.ember.simpleplex.plex.PlexClient
-import com.ember.simpleplex.plex.WakeOnLan
+import com.embergabor.simplex.core.plex.PlexClient
+import com.embergabor.simplex.core.ui.PlayerPrefs
+import com.embergabor.simplex.core.plex.WakeOnLan
 import com.ember.simpleplex.update.Updates
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -73,6 +74,11 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.embergabor.simplex.core.ui.Palette
+import com.embergabor.simplex.core.ui.ThemeMode
+import com.embergabor.simplex.core.ui.Icons
+import com.embergabor.simplex.core.ui.PillButton
+import com.embergabor.simplex.core.ui.okKeys
 
 private enum class Section(val title: String, val icon: ImageVector, val about: String) {
     Update("Update", Icons.Next, "A newer version is on GitHub. Android asks to confirm the install (and, the first time, to allow Simplex to install apps)."),
@@ -97,9 +103,10 @@ fun SettingsScreen(plex: PlexClient, nav: Nav) {
     val memory = rememberFocusMemory()
     val prefs = remember { LibraryPrefs(context) }
     val view = remember { ViewPrefs(context) }
-    var details by remember { mutableStateOf(view.playbackDetails) }
+    val playerPrefs = remember { PlayerPrefs(context) }
+    var details by remember { mutableStateOf(playerPrefs.playbackDetails) }
     var blur by remember { mutableStateOf(view.blurUnwatched) }
-    var tunneled by remember { mutableStateOf(view.tunneled) }
+    var tunneled by remember { mutableStateOf(playerPrefs.tunneled) }
     var hidden by remember { mutableStateOf(prefs.hidden) }
     val libraries by load(Unit) { requireNotNull(plex.home).libraries() }
     var cleared by remember { mutableStateOf(0) }
@@ -160,8 +167,8 @@ fun SettingsScreen(plex: PlexClient, nav: Nav) {
                 if (next == ThemeMode.Auto) ThemePrefs(context).place = null
                 Palette.mode = next
             }
-            Section.Details -> { details = !details; view.playbackDetails = details }
-            Section.Tunneling -> { tunneled = !tunneled; view.tunneled = tunneled }
+            Section.Details -> { details = !details; playerPrefs.playbackDetails = details }
+            Section.Tunneling -> { tunneled = !tunneled; playerPrefs.tunneled = tunneled }
             Section.Spoilers -> { blur = !blur; view.blurUnwatched = blur }
             Section.Storage -> scope.launch {
                 withContext(Dispatchers.IO) { Caches.clear(context) }

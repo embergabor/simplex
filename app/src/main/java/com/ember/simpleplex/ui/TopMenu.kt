@@ -30,6 +30,8 @@ import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.Icon
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
+import com.embergabor.simplex.core.ui.Palette
+import com.embergabor.simplex.core.ui.Icons
 
 /**
  * The menu at the top of Home: a capsule in the middle, tvOS style, with Search, Home and Settings.

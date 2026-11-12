@@ -6,7 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
-import com.ember.simpleplex.plex.PlexClient
+import com.embergabor.simplex.core.plex.PlexClient
 import kotlinx.coroutines.delay
 import okhttp3.Request
 import org.json.JSONObject
@@ -18,6 +18,8 @@ import kotlin.math.acos
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
+import com.embergabor.simplex.core.ui.Palette
+import com.embergabor.simplex.core.ui.ThemeMode
 
 /** Light / Dark / Auto, and where the TV is for Auto. Kept on the TV. */
 class ThemePrefs(context: Context) {

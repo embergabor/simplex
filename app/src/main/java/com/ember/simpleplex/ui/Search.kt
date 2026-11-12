@@ -55,10 +55,10 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
-import com.ember.simpleplex.plex.Item
-import com.ember.simpleplex.plex.Library
-import com.ember.simpleplex.plex.PlexClient
-import com.ember.simpleplex.plex.PlexServer
+import com.embergabor.simplex.core.plex.Item
+import com.embergabor.simplex.core.plex.Library
+import com.embergabor.simplex.core.plex.PlexClient
+import com.embergabor.simplex.core.plex.PlexServer
 import com.ember.simpleplex.ui.SearchMatch.Text as Searchable
 import android.content.Context
 import java.io.File
@@ -70,6 +70,12 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import com.embergabor.simplex.core.ui.Palette
+import com.embergabor.simplex.core.ui.Icons
+import com.embergabor.simplex.core.ui.PosterCard
+import com.embergabor.simplex.core.ui.WideCard
+import com.embergabor.simplex.core.ui.PillButton
+import com.embergabor.simplex.core.ui.formatDuration
 
 private const val SEARCH_HINT = "Search titles, or words from an episode's description"
 private val fieldShape = RoundedCornerShape(12.dp)

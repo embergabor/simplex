@@ -1,6 +1,6 @@
 package com.ember.simpleplex.ui
 
-import com.ember.simpleplex.plex.Item
+import com.embergabor.simplex.core.plex.Item
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
