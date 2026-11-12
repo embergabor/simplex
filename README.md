@@ -61,6 +61,16 @@ Sign in on the TV with the code shown at plex.tv/link. Release builds are signed
 the repo (`~/.simplex-release`, see `app/build.gradle.kts`); without it they fall back to the debug key.
 `tools/release.sh` publishes a signed build as a GitHub release, which release builds offer to install.
 
+## The core
+
+The Plex connection and the player are [simplex-core](https://github.com/embergabor/simplex-core), a
+library shared with PlexVerse. Simplex uses the version named in `app/build.gradle.kts`, fetched from
+[simplex-maven](https://github.com/embergabor/simplex-maven). Two optional lines in `local.properties`
+change that:
+
+- `simplexCore.dir=../simplex-core` builds from a checkout of the core instead, to work on both at once.
+- `simplexMaven.dir=../simplex-maven` takes versions from a local checkout before they're pushed.
+
 ## Server script: compatibility tracks for TrueHD
 
 [`tools/add-compat-tracks.sh`](tools/add-compat-tracks.sh) runs on the Plex server. It adds an AC3 5.1
